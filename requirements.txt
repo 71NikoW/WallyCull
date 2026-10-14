@@ -1,4 +1,4 @@
-# Phase 1 – klassische Bildanalyse, läuft komplett lokal auf der CPU
+# Wird beim Bauen des Setups mitgeliefert (eigenes Python im Programmordner)
 opencv-python>=4.9,<5
 numpy>=1.26
 Pillow>=10.0
@@ -8,3 +8,5 @@ PyYAML>=6.0
 tqdm>=4.66
 Send2Trash>=1.8
 psutil>=5.9
+# Eigenes App-Fenster (Microsoft WebView2, auf Windows 11 vorhanden)
+pywebview>=5.3; sys_platform == "win32"

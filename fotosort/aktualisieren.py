@@ -1,23 +1,34 @@
-"""Selbst-Update der App aus dem privaten GitHub-Repo (über git, Anmeldung macht der Git Credential Manager).
+"""Selbst-Update: holt das neueste Setup aus den Releases des privaten GitHub-Repos und spielt es still ein.
 
-Der Programmordner ist ein git-Klon. Deine Daten (daten/, modelle/, vorbilder/, .venv) sind von git
-ausgenommen und bleiben bei jedem Update unangetastet. Die Datenbanken liegen ohnehin in den Foto-Ordnern.
+Für das private Repo braucht die App einmal eine GitHub-Anmeldung. Bevorzugt kommt sie vom Git Credential
+Manager (ein Klick im Browser), sonst aus einem Lese-Schlüssel, den du in der App einfügst.
+Deine Daten liegen getrennt vom Programm und bleiben bei jedem Update erhalten.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from . import __version__
-from .konfig import PROGRAMM_ORDNER
+from .pfade import BENUTZER_ORDNER, INSTALLIERT
 
-ZWEIG = "main"
+REPO = "71NikoW/foto-aussortierer"
+API = f"https://api.github.com/repos/{REPO}"
 OHNE_FENSTER = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
+SCHLUESSEL_DATEI = BENUTZER_ORDNER / "github-schluessel.txt"
+SCHLUESSEL_LINK = (
+    "https://github.com/settings/personal-access-tokens/new?name=WallyCull-Updates"
+    "&description=Nur+Lesen+fuer+WallyCull-Updates&target_name=71NikoW&expires_in=none&contents=read"
+)
 
 
 def _git_pfad() -> str | None:
@@ -31,73 +42,116 @@ def _git_pfad() -> str | None:
     return None
 
 
-def _git(*args: str, zeit: int = 120) -> str:
+def _git_anmeldung(fragen: bool) -> str | None:
+    """Fragt den Git Credential Manager nach dem GitHub-Zugang (mit fragen=True öffnet er bei Bedarf das Login)."""
     git = _git_pfad()
     if not git:
-        raise RuntimeError("git ist nicht installiert")
+        return None
     umgebung = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    r = subprocess.run([git, "-C", str(PROGRAMM_ORDNER), *args], capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", timeout=zeit, env=umgebung, creationflags=OHNE_FENSTER)
-    if r.returncode:
-        raise RuntimeError((r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout).strip() else "git-Fehler")
-    return r.stdout.strip()
+    if not fragen:
+        umgebung["GCM_INTERACTIVE"] = "never"
+    eingabe = "protocol=https\nhost=github.com\n\n"
+    try:
+        r = subprocess.run([git, "credential", "fill"], input=eingabe, capture_output=True, text=True, timeout=300 if fragen else 20,
+                           env=umgebung, creationflags=OHNE_FENSTER)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    werte = dict(z.split("=", 1) for z in r.stdout.splitlines() if "=" in z)
+    if r.returncode or not werte.get("password"):
+        return None
+    if fragen:  # gespeichert wird erst nach Bestätigung
+        subprocess.run([git, "credential", "approve"], input=r.stdout + "\n", text=True, env=umgebung, creationflags=OHNE_FENSTER)
+    return werte["password"]
+
+
+def _schluessel(fragen: bool = False) -> str | None:
+    if os.environ.get("WALLYCULL_GITHUB_SCHLUESSEL"):
+        return os.environ["WALLYCULL_GITHUB_SCHLUESSEL"]
+    if SCHLUESSEL_DATEI.exists():
+        text = SCHLUESSEL_DATEI.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    return _git_anmeldung(fragen)
+
+
+def schluessel_speichern(text: str) -> None:
+    text = text.strip()
+    if not re.fullmatch(r"(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}", text):
+        raise ValueError("Das sieht nicht wie ein GitHub-Schlüssel aus (beginnt mit github_pat_).")
+    BENUTZER_ORDNER.mkdir(parents=True, exist_ok=True)
+    SCHLUESSEL_DATEI.write_text(text, encoding="utf-8")
+
+
+def _anfrage(url: str, schluessel: str, binaer: bool = False):
+    req = urllib.request.Request(url, headers={"Accept": "application/octet-stream" if binaer else "application/vnd.github+json",
+                                               "User-Agent": "WallyCull", "X-GitHub-Api-Version": "2022-11-28"})
+    # nicht an die Download-Weiterleitung (S3) weitergeben, sonst lehnt die sie ab
+    req.add_unredirected_header("Authorization", f"Bearer {schluessel}")
+    return urllib.request.urlopen(req, timeout=60)
 
 
 def _version_tupel(text: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", text)[:3])
 
 
-def eingerichtet() -> bool:
-    return (PROGRAMM_ORDNER / ".git").exists() and _git_pfad() is not None
+def _releases(schluessel: str) -> list[dict]:
+    with _anfrage(f"{API}/releases?per_page=10", schluessel) as r:
+        alle = json.loads(r.read())
+    ergebnis = []
+    for rel in alle:
+        if rel.get("draft") or rel.get("prerelease"):
+            continue
+        setup = next((a for a in rel.get("assets", []) if a["name"].lower().endswith(".exe")), None)
+        if setup:
+            ergebnis.append({"version": rel["tag_name"].lstrip("v"), "asset": setup["url"], "name": setup["name"],
+                             "groesse": setup["size"], "notizen": (rel.get("body") or "")[:800]})
+    return sorted(ergebnis, key=lambda r: _version_tupel(r["version"]), reverse=True)
 
 
-def pruefen() -> dict:
-    """Holt den neuesten Stand und vergleicht die Version. Ändert noch nichts an den Dateien."""
-    if not eingerichtet():
-        return {"status": "nicht_eingerichtet", "aktuell": __version__}
-    _git("fetch", "--quiet", "origin", ZWEIG)
-    init = _git("show", f"origin/{ZWEIG}:fotosort/__init__.py")
-    treffer = re.search(r'__version__\s*=\s*"([^"]+)"', init)
-    neu = treffer.group(1) if treffer else __version__
-    status = "neu" if _version_tupel(neu) > _version_tupel(__version__) else "aktuell"
-    return {"status": status, "aktuell": __version__, "neu": neu}
+def pruefen(fragen: bool = False) -> dict:
+    if not INSTALLIERT:
+        return {"status": "entwicklung", "aktuell": __version__}
+    schluessel = _schluessel(fragen)
+    if not schluessel:
+        return {"status": "anmeldung", "aktuell": __version__, "git": bool(_git_pfad()), "link": SCHLUESSEL_LINK}
+    try:
+        releases = _releases(schluessel)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403, 404):
+            return {"status": "anmeldung", "aktuell": __version__, "git": bool(_git_pfad()), "link": SCHLUESSEL_LINK,
+                    "fehler": "GitHub hat den Zugriff abgelehnt."}
+        raise
+    if not releases:
+        return {"status": "aktuell", "aktuell": __version__}
+    neueste = releases[0]
+    status = "neu" if _version_tupel(neueste["version"]) > _version_tupel(__version__) else "aktuell"
+    vorher = next((r for r in releases if _version_tupel(r["version"]) < _version_tupel(__version__)), None)
+    return {"status": status, "aktuell": __version__, "neu": neueste["version"], "_release": neueste,
+            "vorherige": vorher["version"] if vorher else None, "_vorher": vorher, "notizen": neueste["notizen"]}
 
 
-def installieren(protokoll=print) -> dict:
-    """Spielt den neuesten Stand ein. Bei Fehlern bleibt die alte Version unverändert."""
-    vorher = _git("rev-parse", "HEAD")
-    _git("fetch", "--quiet", "origin", ZWEIG)
-    geaendert = _git("diff", "--name-only", vorher, f"origin/{ZWEIG}").splitlines()
-    _git("reset", "--hard", "--quiet", f"origin/{ZWEIG}")
-    (PROGRAMM_ORDNER / "daten").mkdir(exist_ok=True)
-    (PROGRAMM_ORDNER / "daten" / "vorherige-version.txt").write_text(vorher, encoding="utf-8")
-    python = python_exe()
-    pip = [python, "-m", "pip", "install", "--quiet", "--disable-pip-version-check"]
-    if "requirements.txt" in geaendert:
-        protokoll("Aktualisiere Pakete ...")
-        subprocess.run(pip + ["-r", str(PROGRAMM_ORDNER / "requirements.txt")], creationflags=OHNE_FENSTER)
-    if "requirements-ki.txt" in geaendert and _ki_installiert():
-        subprocess.run(pip + ["-r", str(PROGRAMM_ORDNER / "requirements-ki.txt")], creationflags=OHNE_FENSTER)
-    return {"vorher": vorher, "dateien": len(geaendert)}
+def herunterladen(release: dict, protokoll=print) -> Path:
+    schluessel = _schluessel()
+    if not schluessel:
+        raise RuntimeError("keine GitHub-Anmeldung")
+    ziel = Path(tempfile.gettempdir()) / release["name"]
+    protokoll(f"Lade {release['name']} ({release['groesse'] / 1048576:.0f} MB) ...")
+    with _anfrage(release["asset"], schluessel, binaer=True) as r, open(ziel, "wb") as f:
+        shutil.copyfileobj(r, f, 1024 * 1024)
+    if ziel.stat().st_size != release["groesse"]:
+        raise RuntimeError("Download unvollständig")
+    return ziel
 
 
-def zuruecksetzen() -> None:
-    """Geht zur Version vor dem letzten Update zurück (falls ein Update Probleme macht)."""
-    datei = PROGRAMM_ORDNER / "daten" / "vorherige-version.txt"
-    if not datei.exists():
-        raise RuntimeError("keine vorherige Version gespeichert")
-    _git("reset", "--hard", "--quiet", datei.read_text(encoding="utf-8").strip())
-
-
-def _ki_installiert() -> bool:
-    import importlib.util
-
-    return importlib.util.find_spec("torch") is not None
+def setup_starten(setup: Path) -> None:
+    """Startet das Setup unsichtbar. Es schließt die App, aktualisiert und startet sie neu."""
+    subprocess.Popen([str(setup), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                     cwd=str(setup.parent), creationflags=(0x00000008 | 0x00000200) if sys.platform == "win32" else 0)
 
 
 def python_exe() -> str:
-    """python.exe neben pythonw.exe: für Hintergrund-Aufgaben, deren Ausgabe die App mitliest."""
+    """python.exe im Programmordner: für Hintergrund-Aufgaben, deren Ausgabe die App mitliest."""
     pfad = Path(sys.executable)
-    if pfad.name.lower() == "pythonw.exe" and (pfad.parent / "python.exe").exists():
+    if pfad.name.lower() != "python.exe" and (pfad.parent / "python.exe").exists():
         return str(pfad.parent / "python.exe")
     return sys.executable

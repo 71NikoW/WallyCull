@@ -8,8 +8,6 @@ from pathlib import Path
 
 from . import __version__, analyse, bericht, dateien, einteilung, ki, konfig, lernen, oberflaeche
 
-KI_PAKETE_INDEX = "https://download.pytorch.org/whl/cu126"
-
 
 def _ordner(pfad: str) -> Path:
     p = Path(pfad).expanduser().resolve()
@@ -73,7 +71,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--ohne-fenster", action="store_true", help=argparse.SUPPRESS)
 
-    unter.add_parser("ki-installieren", help="PyTorch (Grafikkarte) und KI-Modelle installieren")
+    kia = unter.add_parser("ki-installieren", help="PyTorch (Grafikkarte), CLIP und die KI-Modelle installieren")
+    kia.add_argument("--neu", action="store_true", help="auch dann neu installieren, wenn schon alles da ist")
+    unter.add_parser("ki-modelle-laden", help=argparse.SUPPRESS)
 
     argv = sys.argv[1:] if argv is None else argv
     args = p.parse_args(argv or ["app"])
@@ -83,7 +83,11 @@ def main(argv: list[str] | None = None) -> None:
         from . import app
         return app.starten(k, port=args.port, fenster=not args.ohne_fenster)
     if args.befehl == "ki-installieren":
-        return ki_installieren()
+        from . import ki_einrichten
+        sys.exit(ki_einrichten.installieren(erzwingen=args.neu))
+    if args.befehl == "ki-modelle-laden":
+        from . import ki_einrichten
+        return ki_einrichten.modelle_laden(k)
     ordner = _ordner(args.ordner)
 
     if args.befehl == "analysieren":
@@ -136,18 +140,3 @@ def main(argv: list[str] | None = None) -> None:
     elif args.befehl == "bericht":
         print(bericht.erstellen(ordner, oeffnen=True))
 
-
-def ki_installieren() -> None:
-    """Installiert PyTorch mit NVIDIA-Unterstützung und die KI-Pakete in die Umgebung der App."""
-    import subprocess
-
-    pip = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check"]
-    print("Installiere PyTorch mit Grafikkarten-Unterstützung (Download ca. 3 GB) ...", flush=True)
-    subprocess.run(pip + ["torch", "torchvision", "--index-url", KI_PAKETE_INDEX], check=True)
-    subprocess.run(pip + ["-r", str(konfig.PROGRAMM_ORDNER / "requirements-ki.txt")], check=True)
-    print("Installiere optionale Zusatzmodelle (MUSIQ, NIMA) ...", flush=True)
-    if subprocess.run(pip + ["pyiqa"]).returncode:
-        print("Hinweis: pyiqa ließ sich nicht installieren. Es geht ohne MUSIQ/NIMA weiter.")
-    subprocess.run([sys.executable, "-c", "import torch;print('Grafikkarte:', torch.cuda.get_device_name(0) "
-                    "if torch.cuda.is_available() else 'nicht erkannt, KI läuft auf der CPU (langsamer)')"])
-    print("Fertig. Beim nächsten Analysieren werden die KI-Modelle einmalig geladen (ca. 2 GB).")

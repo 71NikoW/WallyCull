@@ -1,8 +1,9 @@
 """Die App: ein eigenes Fenster mit allen Funktionen, läuft komplett lokal (127.0.0.1).
 
-Start über die Verknüpfung auf dem Desktop (pythonw -m fotosort). Aufwendige Schritte (Analyse, Verschieben,
+Start über die Verknüpfung auf dem Desktop. Das Fenster ist ein eigenes Programmfenster (WebView2), kein Browser.
+Aufwendige Schritte (Analyse, Verschieben,
 KI-Installation) laufen als Hintergrund-Prozess mit niedriger Priorität, die App zeigt den Fortschritt.
-Beim Start und alle 6 Stunden sucht sie nach Updates und spielt sie selbst ein.
+Beim Start und alle 6 Stunden sucht sie nach einem neuen Setup und spielt es selbst ein.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from urllib.parse import urlparse
 from . import __version__, aktualisieren, datenbank, ki, oberflaeche
 from .einteilung import KATEGORIEN, NAMEN
 from .konfig import DATEN_ORDNER, PROGRAMM_ORDNER
+from .pfade import VORBILDER_ORDNER
 
 OHNE_FENSTER = aktualisieren.OHNE_FENSTER
 LEERLAUF_ENDE = 300  # Sekunden ohne offenes Fenster, nach denen die App sich beendet
@@ -34,7 +36,7 @@ FORTSCHRITT = re.compile(r"^\s*(?P<titel>[^:|]{1,40}):\s*(?P<pz>\d+)%\|.*?\|\s*(
 TITEL = {
     "analysieren": "Analyse", "einteilen": "Einteilen", "aussortieren": "Aussortieren",
     "zurueckholen": "Zurückholen", "loeschen": "In den Papierkorb", "ki-installieren": "KI installieren",
-    "update": "Update",
+    "update": "Update", "zuruecksetzen": "Vorherige Version",
 }
 
 
@@ -122,9 +124,8 @@ class App:
         self.sitzung: oberflaeche.Sitzung | None = None
         self.update: dict = {"status": "unbekannt", "aktuell": __version__}
         self.letzter_kontakt = time.time()
-        self.fenster_offen = False
         self.server: ThreadingHTTPServer | None = None
-        self.neustart = False
+        self.ende = threading.Event()
         self.ki = ki.verfuegbar()[0]
 
     # ----- Zustand -------------------------------------------------------------------------------
@@ -185,7 +186,8 @@ class App:
         return {
             "app": "fotosort", "version": __version__, "ordner": str(self.ordner) if self.ordner else None,
             "zuletzt": [z for z in self.zustand["zuletzt"] if Path(z).is_dir()], "statistik": self.statistik(),
-            "aufgabe": self.aufgabe.als_dict() if self.aufgabe else None, "update": self.update, "ki": self.ki,
+            "aufgabe": self.aufgabe.als_dict() if self.aufgabe else None, "ki": self.ki,
+            "update": {k: v for k, v in self.update.items() if not k.startswith("_")},
             "namen": NAMEN,
         }
 
@@ -219,9 +221,12 @@ class App:
         with self.sperre:
             if self.aufgabe and self.aufgabe.status in ("laeuft", "abbrechen"):
                 raise RuntimeError("Es läuft schon eine Aufgabe")
-            if art == "update":
-                self.aufgabe = Aufgabe("update", None, False)
-                threading.Thread(target=self._update_einspielen, daemon=True).start()
+            if art in ("update", "zuruecksetzen"):
+                release = self.update.get("_release" if art == "update" else "_vorher")
+                if not release:
+                    raise RuntimeError("Keine passende Version gefunden")
+                self.aufgabe = Aufgabe(art, None, False)
+                threading.Thread(target=self._update_einspielen, args=(release,), daemon=True).start()
                 return self.aufgabe.als_dict()
             if art == "ki-installieren":
                 self.aufgabe = Aufgabe(art, ["ki-installieren"], True, self._nach_aufgabe)
@@ -260,36 +265,38 @@ class App:
         if aufgabe.art == "ki-installieren":
             import importlib
 
+            from . import pfade
+
+            pfade.einrichten()
             importlib.invalidate_caches()
             self.ki = ki.verfuegbar()[0]
         if self.update.get("status") == "neu":  # aufgeschobenes Update jetzt einspielen
             threading.Thread(target=self._update_automatisch, daemon=True).start()
 
     # ----- Updates -------------------------------------------------------------------------------
-    def _update_pruefen(self) -> None:
+    def _update_pruefen(self, fragen: bool = False) -> None:
         try:
-            self.update = {**aktualisieren.pruefen(), "geprueft": time.strftime("%H:%M")}
+            self.update = {**aktualisieren.pruefen(fragen), "geprueft": time.strftime("%H:%M")}
         except Exception as e:
             self.update = {"status": "fehler", "aktuell": __version__, "fehler": str(e)[:200], "geprueft": time.strftime("%H:%M")}
 
-    def _update_automatisch(self) -> None:
-        self._update_pruefen()
+    def _update_automatisch(self, fragen: bool = False) -> None:
+        self._update_pruefen(fragen)
         if self.update.get("status") == "neu":
             try:
                 self.starte("update", {})
             except RuntimeError:
                 pass  # eine Aufgabe läuft: wird danach eingespielt
 
-    def _update_einspielen(self) -> None:
+    def _update_einspielen(self, release: dict) -> None:
         a = self.aufgabe
         try:
-            a.zeile(f"Installiere Version {self.update.get('neu', '')} ...")
-            aktualisieren.installieren(a.zeile)
-            a.zeile("Fertig. Die App startet neu ...")
+            setup = aktualisieren.herunterladen(release, a.zeile)
+            a.zeile(f"Installiere Version {release['version']}. WallyCull schließt sich kurz und startet neu ...")
             a.beenden(0)
-            self.neustart = True
-            time.sleep(1.5)
-            self.server.shutdown()
+            time.sleep(2.5)
+            aktualisieren.setup_starten(setup)
+            self.beenden()
         except Exception as e:
             a.zeile(f"Update fehlgeschlagen: {e}")
             a.beenden(1)
@@ -297,52 +304,91 @@ class App:
 
     def _update_schleife(self) -> None:
         time.sleep(3)
-        while True:
+        while not self.ende.is_set():
             self._update_automatisch()
-            time.sleep(UPDATE_ABSTAND)
+            self.ende.wait(UPDATE_ABSTAND)
 
-    # ----- Fenster und Leerlauf ------------------------------------------------------------------
+    # ----- Beenden -------------------------------------------------------------------------------
     def _beschaeftigt(self) -> bool:
         return bool(self.aufgabe and self.aufgabe.status in ("laeuft", "abbrechen"))
 
-    def _leerlauf_schleife(self) -> None:
-        while True:
-            time.sleep(10)
-            if self._beschaeftigt():
-                continue
-            if not self.fenster_offen and time.time() - self.letzter_kontakt > LEERLAUF_ENDE:
-                self.server.shutdown()
-                return
+    def beenden(self) -> None:
+        """Schließt alle Fenster und beendet den Server (z. B. für ein Update)."""
+        self.ende.set()
+        try:
+            import webview
 
-    def fenster_oeffnen(self, adresse: str) -> None:
-        browser = _app_browser()
-        if not browser:
-            webbrowser.open(adresse)
-            return
-        profil = DATEN_ORDNER / "fenster"
-        prozess = subprocess.Popen([browser, f"--app={adresse}", f"--user-data-dir={profil}", "--window-size=1400,900",
-                                    "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"])
-
-        def warten():
-            start = time.time()
-            self.fenster_offen = True
-            prozess.wait()
-            self.fenster_offen = False
-            if time.time() - start > 5:  # Fenster wurde geschlossen (nicht nur an laufendes Edge übergeben)
-                self.letzter_kontakt = 0
-        threading.Thread(target=warten, daemon=True).start()
+            for w in list(webview.windows):
+                w.destroy()
+        except Exception:
+            pass
 
 
-def _app_browser() -> str | None:
-    """Edge (auf Windows 11 immer da) oder Chrome im App-Modus: eigenes Fenster ohne Adressleiste."""
-    kandidaten = []
-    for basis in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
-        if basis:
-            kandidaten += [Path(basis) / "Microsoft/Edge/Application/msedge.exe", Path(basis) / "Google/Chrome/Application/chrome.exe"]
-    return next((str(k) for k in kandidaten if k.exists()), None)
+class FensterApi:
+    """Aus der Seite aufrufbar (window.pywebview.api): Dinge, die ein Browser nicht kann."""
+
+    def __init__(self):
+        self._fenster = None
+
+    def ordner_waehlen(self, start: str = "") -> str:
+        import webview
+
+        art = webview.FileDialog.FOLDER if hasattr(webview, "FileDialog") else webview.FOLDER_DIALOG
+        ergebnis = self._fenster.create_file_dialog(art, directory=start or "")
+        return ergebnis[0] if ergebnis else ""
+
+
+def _symbol_setzen(fenster) -> None:
+    """Eigenes Symbol in Titelleiste und Taskleiste (statt des Python-Symbols)."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    try:
+        hwnd = int(fenster.native.Handle.ToInt64())
+    except Exception:
+        return
+    user32 = ctypes.windll.user32
+    user32.LoadImageW.restype = ctypes.c_void_p
+    user32.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p]
+    datei = str(Path(__file__).with_name("symbol.ico"))
+    for groesse, art in ((16, 0), (32, 1)):  # ICON_SMALL, ICON_BIG
+        symbol = user32.LoadImageW(None, datei, 1, groesse * 2 if art else groesse, groesse * 2 if art else groesse, 0x10)
+        if symbol:
+            user32.SendMessageW(hwnd, 0x80, art, symbol)
+
+
+def _app_id_setzen() -> None:
+    """Gleiche App-ID wie die Verknüpfung: Windows zeigt in der Taskleiste das WallyCull-Symbol."""
+    if sys.platform == "win32":
+        import ctypes
+
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("WallyFrame.WallyCull")
+        except Exception:
+            pass
+
+
+def fenster_zeigen(adresse: str, app: App | None = None) -> bool:
+    """Öffnet das App-Fenster (WebView2, kein Browser) und wartet, bis es geschlossen wird."""
+    try:
+        import webview
+    except ImportError:
+        webbrowser.open(adresse)
+        return False
+    api = FensterApi()
+    fenster = webview.create_window("WallyCull", adresse, width=1440, height=940, min_size=(960, 640),
+                                    js_api=api, text_select=True)
+    api._fenster = fenster
+    fenster.events.shown += lambda: _symbol_setzen(fenster)
+    DATEN_ORDNER.mkdir(parents=True, exist_ok=True)
+    webview.start(private_mode=False, storage_path=str(DATEN_ORDNER / "fenster"))
+    return True
 
 
 def _ordner_dialog(start: str | None) -> str:
+    """Nur ohne App-Fenster (Entwicklung): Auswahl über tkinter."""
     skript = ("import sys,tkinter as tk;from tkinter import filedialog;r=tk.Tk();r.withdraw();r.attributes('-topmost',True);"
               "print(filedialog.askdirectory(title='Foto-Ordner wählen',initialdir=sys.argv[1] or None,mustexist=True) or '')")
     r = subprocess.run([aktualisieren.python_exe(), "-c", skript, start or ""], capture_output=True, text=True,
@@ -408,12 +454,19 @@ def _handler_klasse(app: App):
                 elif self.path == "/app/abbrechen":
                     if app.aufgabe:
                         app.aufgabe.abbrechen()
-                elif self.path == "/app/update_pruefen":
+                elif self.path in ("/app/update_pruefen", "/app/update_anmelden"):
+                    app.update = {**app.update, "status": "pruefe"}
+                    threading.Thread(target=app._update_automatisch, args=(self.path.endswith("anmelden"),), daemon=True).start()
+                elif self.path == "/app/schluessel":
+                    aktualisieren.schluessel_speichern(str(daten.get("schluessel", "")))
+                    app.update = {**app.update, "status": "pruefe"}
                     threading.Thread(target=app._update_automatisch, daemon=True).start()
-                elif self.path == "/app/zuruecksetzen":
-                    aktualisieren.zuruecksetzen()
-                    app.neustart = True
-                    threading.Thread(target=app.server.shutdown, daemon=True).start()
+                elif self.path == "/app/link":
+                    if str(daten.get("url", "")).startswith("https://github.com/"):
+                        webbrowser.open(daten["url"])
+                elif self.path == "/app/vorbilder_zeigen":
+                    VORBILDER_ORDNER.mkdir(parents=True, exist_ok=True)
+                    os.startfile(str(VORBILDER_ORDNER))  # type: ignore[attr-defined]
                 elif self.path == "/app/ordner_zeigen" and app.ordner:
                     ziel = app.ordner / app.konfig["dateien"]["aussortiert_ordner"]
                     os.startfile(str(ziel if ziel.exists() else app.ordner))  # type: ignore[attr-defined]
@@ -435,9 +488,9 @@ def _laeuft_schon(port: int) -> bool:
 
 
 def _protokoll_umleiten() -> None:
-    """pythonw hat keine Konsole: Meldungen und Fehler landen in daten/app.log."""
+    """Ohne Konsole (Start über die Verknüpfung): Meldungen und Fehler landen in app.log."""
     if sys.stdout is None or sys.stderr is None:
-        DATEN_ORDNER.mkdir(exist_ok=True)
+        DATEN_ORDNER.mkdir(parents=True, exist_ok=True)
         datei = open(DATEN_ORDNER / "app.log", "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stdout or datei
         sys.stderr = sys.stderr or datei
@@ -445,10 +498,11 @@ def _protokoll_umleiten() -> None:
 
 def starten(konfig: dict, port: int = 8765, fenster: bool = True) -> None:
     _protokoll_umleiten()
-    app = App(konfig)
-    if _laeuft_schon(port):  # App ist schon offen: nur ein weiteres Fenster zeigen
-        app.fenster_oeffnen(f"http://127.0.0.1:{port}/")
+    _app_id_setzen()
+    if _laeuft_schon(port):  # WallyCull läuft schon (z. B. Analyse im Hintergrund): nur das Fenster wieder öffnen
+        fenster_zeigen(f"http://127.0.0.1:{port}/")
         return
+    app = App(konfig)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), _handler_klasse(app))
     except OSError:
@@ -457,21 +511,19 @@ def starten(konfig: dict, port: int = 8765, fenster: bool = True) -> None:
     app.server = server
     adresse = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} WallyCull {__version__} läuft: {adresse}")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=app._update_schleife, daemon=True).start()
-    threading.Thread(target=app._leerlauf_schleife, daemon=True).start()
-    if fenster:
-        app.fenster_oeffnen(adresse)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
-    if app.neustart:  # nach einem Update: neue Version starten, das offene Fenster lädt sich selbst neu
-        pythonw = Path(sys.executable).with_name("pythonw.exe")
-        subprocess.Popen([str(pythonw if pythonw.exists() else sys.executable), "-m", "fotosort", "app", "--ohne-fenster",
-                          "--port", str(server.server_address[1])], cwd=PROGRAMM_ORDNER,
-                         creationflags=(0x00000008 | 0x00000200) if sys.platform == "win32" else 0)
+    gezeigt = fenster_zeigen(adresse, app) if fenster else False
+    # Fenster zu: laufende Aufgaben (z. B. Analyse) dürfen zu Ende laufen. Ein erneut geöffnetes Fenster hält die App wach.
+    frist = 90 if gezeigt else LEERLAUF_ENDE
+    zu = time.time()
+    while not app.ende.is_set():
+        if not app._beschaeftigt() and time.time() - max(app.letzter_kontakt, zu) > frist:
+            break
+        app.ende.wait(5)
+    app.ende.set()
+    server.shutdown()
+    server.server_close()
 
 
 BEWERTEN_SEITE = oberflaeche.SEITE.replace(
@@ -570,7 +622,7 @@ pre{margin:6px 0 0;max-height:150px;overflow:auto;font:12px/1.45 Consolas,monosp
   <section class="karte"><h2>KI-Bewertung</h2><div id="kistatus" class="klein"></div></section>
   <section class="karte"><h2>Updates</h2><div id="updatestatus" class="klein"></div>
     <div class="reihe" style="margin-top:10px"><button id="updateknopf">Jetzt prüfen</button><button id="zurueckknopf" title="Zur Version vor dem letzten Update">Vorherige Version</button></div></section>
-  <section class="karte klein leise">Alles läuft nur auf diesem PC. Fotos werden nie hochgeladen. Wenn du das Fenster schließt, laufen gestartete Aufgaben zu Ende.</section>
+  <section class="karte klein leise">Alles läuft nur auf diesem PC, auch die KI. Fotos werden nie hochgeladen. Schließt du das Fenster, laufen gestartete Aufgaben im Hintergrund zu Ende.</section>
 </aside>
 </main>
 <div id="aufgabe"><div class="reihe"><b id="atitel"></b><span class="leise klein" id="atext"></span><span style="flex:1"></span>
@@ -582,6 +634,7 @@ const $=s=>document.querySelector(s);
 let Z=null, version=null, geschlossen=null;
 const esc=t=>String(t??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const mb=b=>(b/1048576).toLocaleString("de-DE",{maximumFractionDigits:0})+" MB";
+function html(el,h){if(el._h!==h){el._h=h;el.innerHTML=h;}}
 function hinweis(t,ms=3500){const h=$("#hinweis");h.textContent=t;h.style.display="block";clearTimeout(h._t);h._t=setTimeout(()=>h.style.display="none",ms);}
 async function post(pfad,daten={}){
   const r=await fetch(pfad,{method:"POST",headers:{"X-Fotosort":"1"},body:JSON.stringify(daten)});
@@ -607,13 +660,20 @@ function zeichnen(j){
   document.querySelectorAll("[data-ordner]").forEach(b=>b.disabled=!j.ordner||laeuft);
   document.querySelectorAll("[data-db]").forEach(b=>b.disabled=!s||laeuft);
   $("#waehlen").disabled=$("#pfadok").disabled=laeuft;
-  $("#kistatus").innerHTML=j.ki?"Installiert. Ästhetik, Wandbild-Eignung und Inhalt werden beim Analysieren mitbewertet (Grafikkarte).<br><span class='leise'>Vorbilder: Lege Lieblingsbilder in den Ordner <b>vorbilder</b> im Programmordner.</span>"
-    :`<p style="margin:0 0 10px">Noch nicht installiert. Ohne KI wird nur die Technik bewertet.</p><button class="haupt" data-art="ki-installieren" ${laeuft?"disabled":""}>KI installieren (ca. 3 GB)</button>`;
+  html($("#kistatus"),j.ki?"Eingerichtet. Ästhetik, Wandbild-Eignung und Inhalt werden beim Analysieren mitbewertet."
+    +"<p class='leise' style='margin:8px 0'>Vorbilder: Lege Lieblingsbilder (z. B. deine Bestseller) in den Vorbilder-Ordner. Fotos in diesem Stil steigen im Wert.</p><button id='vorbilder'>Vorbilder-Ordner öffnen</button>"
+    :`<p style="margin:0 0 10px">Noch nicht eingerichtet (normalerweise erledigt das Setup). Ohne KI wird nur die Technik bewertet.</p><button class="haupt" data-art="ki-installieren" ${laeuft?"disabled":""}>KI einrichten (ca. 5 GB)</button>`);
   const u=j.update, um=$("#updatemarke");
-  const ut={neu:`Neue Version ${u.neu} wird installiert …`,aktuell:`Aktuell (geprüft ${u.geprueft||""})`,nicht_eingerichtet:"Updates sind nicht eingerichtet (kein git-Klon).",
-    fehler:"Konnte nicht prüfen: "+esc(u.fehler||""),unbekannt:"Wird geprüft …"}[u.status]||u.status;
-  $("#updatestatus").innerHTML=ut; um.hidden=u.status!=="neu"; um.textContent="Update "+(u.neu||""); um.className="marke neu";
-  $("#updateknopf").disabled=$("#zurueckknopf").disabled=laeuft||u.status==="nicht_eingerichtet";
+  let ut={neu:`Neue Version ${esc(u.neu)} wird installiert …`,aktuell:`Aktuell (geprüft ${u.geprueft||""})`,pruefe:"Wird geprüft …",unbekannt:"Wird geprüft …",
+    entwicklung:"Entwicklerversion: Updates gibt es nur in der installierten App.",fehler:"Konnte nicht prüfen: "+esc(u.fehler||"")}[u.status]||esc(u.status);
+  if(u.status==="anmeldung") ut=`<p style="margin:0 0 10px">Für automatische Updates aus deinem privaten Repo braucht WallyCull einmal deine GitHub-Anmeldung.${u.fehler?" "+esc(u.fehler):""}</p>`
+    +(u.git?`<button class="haupt" id="anmelden">Mit GitHub verbinden</button><p class="leise" style="margin:10px 0 6px">Oder einen Lese-Schlüssel einfügen:</p>`:`<p class="leise" style="margin:0 0 6px">Lese-Schlüssel einfügen:</p>`)
+    +`<div class="reihe"><input type="text" id="schluessel" placeholder="github_pat_…" style="flex:1;min-width:0"><button id="schluesselok">Speichern</button></div>`
+    +`<button id="schluessellink" style="margin-top:8px">Schlüssel auf GitHub erstellen</button>`;
+  html($("#updatestatus"),ut); um.hidden=u.status!=="neu"; um.textContent="Update "+(u.neu||""); um.className="marke neu";
+  $("#zurueckknopf").textContent=u.vorherige?`Zurück zu ${u.vorherige}`:"Vorherige Version";
+  $("#zurueckknopf").disabled=laeuft||!u.vorherige;
+  $("#updateknopf").disabled=laeuft||["entwicklung","anmeldung","pruefe"].includes(u.status);
   const a=j.aufgabe, box=$("#aufgabe");
   if(a&&geschlossen!==a.art+a.sekunden&&(laeuft||geschlossen!==a.art)){
     box.classList.add("an");
@@ -630,7 +690,9 @@ function zeichnen(j){
 }
 $("#aschliessen").onclick=()=>{geschlossen=Z.aufgabe.art; $("#aufgabe").classList.remove("an");};
 $("#abbrechen").onclick=()=>post("/app/abbrechen");
-$("#waehlen").onclick=()=>{hinweis("Ordner-Auswahl ist geöffnet (evtl. hinter diesem Fenster).");post("/app/ordner_waehlen").then(()=>schliessen());};
+$("#waehlen").onclick=async()=>{
+  if(window.pywebview&&window.pywebview.api){const p=await window.pywebview.api.ordner_waehlen(Z&&Z.ordner||"");if(p)post("/app/ordner",{pfad:p}).then(()=>schliessen());}
+  else{hinweis("Ordner-Auswahl ist geöffnet (evtl. hinter diesem Fenster).");post("/app/ordner_waehlen").then(()=>schliessen());}};
 $("#pfadok").onclick=()=>{const p=$("#pfadeingabe").value.trim();if(p)post("/app/ordner",{pfad:p}).then(j=>{if(j){$("#pfadeingabe").value="";schliessen();}});};
 $("#pfadeingabe").onkeydown=e=>{if(e.key==="Enter")$("#pfadok").click();};
 $("#zuletzt").onclick=e=>{const b=e.target.closest("button");if(b)post("/app/ordner",{pfad:b.dataset.pfad}).then(()=>schliessen());};
@@ -665,7 +727,12 @@ $("#loeschen").onclick=()=>{const w=$("#loeschwort").value.trim().toUpperCase();
   if(w!=="LÖSCHEN"&&w!=="LOESCHEN"){hinweis("Zum Bestätigen LÖSCHEN eintippen.");return;}
   geschlossen=null;post("/app/aufgabe",{art:"loeschen",bestaetigung:w}).then(()=>{$("#loeschwort").value="";});};
 $("#updateknopf").onclick=()=>{hinweis("Suche nach Updates …");post("/app/update_pruefen");};
-$("#zurueckknopf").onclick=()=>{if(confirm("Zur Version vor dem letzten Update zurückgehen? Die App startet neu."))post("/app/zuruecksetzen");};
+$("#zurueckknopf").onclick=()=>{if(confirm(`Zu Version ${Z.update.vorherige} zurückgehen? WallyCull startet dafür kurz neu.`)){geschlossen=null;post("/app/aufgabe",{art:"zuruecksetzen"});}};
+document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  if(b.id==="vorbilder") post("/app/vorbilder_zeigen");
+  else if(b.id==="anmelden"){hinweis("GitHub-Anmeldung öffnet sich (evtl. im Browser).",6000);post("/app/update_anmelden");}
+  else if(b.id==="schluesselok"){const v=$("#schluessel").value.trim();if(v)post("/app/schluessel",{schluessel:v});}
+  else if(b.id==="schluessellink") post("/app/link",{url:Z.update.link});});
 laden(); setInterval(()=>{if(!document.hidden)laden();},1500); setInterval(laden,30000);
 </script></body></html>
 """

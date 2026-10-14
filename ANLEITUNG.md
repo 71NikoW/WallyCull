@@ -6,18 +6,21 @@ Alles läuft lokal auf deinem PC, keine Fotos verlassen den Rechner.
 
 ## 1. Installation (einmalig)
 
-Die App liegt in `%LOCALAPPDATA%\Programs\WallyCull` und ist ein Klon deines privaten
-GitHub-Repos `71NikoW/foto-aussortierer`. **`Einrichten.bat`** legt die Python-Umgebung an,
-installiert alle Pakete und erstellt die Verknüpfung **WallyCull** auf dem Desktop und im Startmenü.
-`Einrichten.bat -MitKI` installiert die KI gleich mit.
+1. Auf GitHub unter **Releases** (<https://github.com/71NikoW/foto-aussortierer/releases/latest>) die Datei
+   **`WallyCull-Setup-<Version>.exe`** herunterladen und starten.
+   Windows meldet beim ersten Mal „Der Computer wurde durch Windows geschützt“, weil das Setup nicht signiert ist:
+   **Weitere Informationen → Trotzdem ausführen**.
+2. Das Setup installiert WallyCull samt eigenem Python und richtet danach automatisch die KI ein
+   (PyTorch für deine NVIDIA-Grafikkarte, CLIP und die Bewertungsmodelle, einmalig ca. 5 GB Download).
+3. Fertig: **WallyCull** liegt auf dem Desktop und im Startmenü. Administratorrechte braucht es nicht.
 
-**Updates kommen von selbst:** Beim Start und alle 6 Stunden schaut die App im Repo nach einer neuen
-Version, spielt sie ein und startet kurz neu. Deine Daten bleiben dabei unangetastet. Falls ein Update
-Probleme macht: rechts **„Vorherige Version“**.
+**Updates kommen von selbst:** Beim Start und alle 6 Stunden schaut WallyCull nach einem neuen Setup,
+lädt es, installiert es unsichtbar und startet neu. Weil dein Repo privat ist, verbindest du die App beim
+ersten Start einmal mit GitHub (rechts unter „Updates“). Falls ein Update Probleme macht: **„Zurück zu …“**.
 
 ## 2. Benutzung
 
-Doppelklick auf **WallyCull**. Es öffnet sich ein eigenes Fenster:
+Doppelklick auf **WallyCull**. Es öffnet sich das Programmfenster:
 
 1. **Ordner wählen** (oder Pfad einfügen). Zuletzt benutzte Ordner stehen darunter.
 2. **Analysieren:** misst alle Bilder und teilt sie ein. **Verändert keine Dateien.** Läuft mit niedriger
@@ -57,12 +60,12 @@ Nach dem Analysieren auf **Bewerten** klicken. Es erscheint Bild für Bild:
 
 ## 3b. KI-Modelle (Phase 2)
 
-Einmalig rechts in der App auf **„KI installieren“** klicken. Das installiert PyTorch für deine NVIDIA-Grafikkarte (ca. 3 GB). Beim ersten Analysieren danach werden die Modelle einmalig geladen (ca. 2 GB). Ab dann läuft alles offline, deine Fotos verlassen den PC nie.
+Das Setup richtet die KI automatisch ein (falls das einmal scheitert: rechts in der App **„KI einrichten“**). Ab dann läuft alles offline, deine Fotos verlassen den PC nie.
 
 - **CLIP (ViT-L/14):** erkennt den Inhalt (Landschaft, Menschen, Tier, Architektur … oder Screenshot, Beleg, versehentliches Foto) und schätzt die Wandbild-Eignung.
 - **LAION-Ästhetik:** Note 1–10, gelernt aus Hunderttausenden online bewerteten Fotos.
 - **MUSIQ und NIMA** (optional, über pyiqa): technische Qualität und Ästhetik, trainiert auf Fotowettbewerben.
-- **Vorbilder:** Lege 20–100 Bilder, die für dich gute Wandbilder sind, in den Ordner **`vorbilder`** im Programmordner. Jedes Foto bekommt dann einen Wert dafür, wie nah es an diesem Stil liegt.
+- **Vorbilder:** Lege 20–100 Bilder, die für dich gute Wandbilder sind, in den Vorbilder-Ordner (in der App rechts: **„Vorbilder-Ordner öffnen“**). Jedes Foto bekommt dann einen Wert dafür, wie nah es an diesem Stil liegt.
 
 Daraus entsteht ein **Wert-Score**. Ab jetzt gilt die Matrix: Nur Bilder, die technisch schwach **und** wenig wert sind, werden aussortiert. Dein persönliches Modell (Bewerten) nutzt alle KI-Werte und die CLIP-Bildmerkmale mit. Es lernt also auch Motive und Bildstil.
 
@@ -99,7 +102,7 @@ nie aussortiert, sondern landet in „Prüfen“. Ab Phase 2/3 entscheidet die M
 ## 7. Einstellungen anpassen
 
 Alle Grenzwerte stehen kommentiert in **`config.yaml`** im Programmordner. Ändere sie aber nicht dort
-(Updates überschreiben die Datei), sondern lege **`daten\eigene-einstellungen.yaml`** an und schreib nur
+(Updates überschreiben die Datei), sondern lege **`%LOCALAPPDATA%\WallyCull\eigene-einstellungen.yaml`** an und schreib nur
 die geänderten Werte hinein, z. B.:
 
 ```yaml
@@ -124,24 +127,25 @@ Nach einer Änderung einfach wieder **Analysieren**: Gemessen wird nur, was neu 
 - `<Foto-Ordner>\.fotosort\modell.json` – dein trainiertes Modell.
 - `<Foto-Ordner>\.fotosort\bericht.html` – der Bericht (Klick auf ein Bild zeigt alle Messwerte und Begründungen).
 - `<Foto-Ordner>\_aussortiert\` – aussortierte Bilder mit unveränderter Ordnerstruktur.
-- Programmordner `daten\` – deine eigenen Einstellungen, zuletzt benutzte Ordner, `app.log` (Fehlerprotokoll).
-- Programmordner `modelle\` und `vorbilder\` – KI-Modelle und deine Vorbild-Bilder. Bleiben bei Updates erhalten.
+- `%LOCALAPPDATA%\Programs\WallyCull` – das Programm (wird bei Updates ersetzt).
+- `%LOCALAPPDATA%\WallyCull` – alles von dir: eigene Einstellungen, zuletzt benutzte Ordner, `app.log` (Fehlerprotokoll),
+  KI-Pakete, Modelle und Vorbilder. Bleibt bei Updates und auch beim Deinstallieren erhalten.
 
 ## 9. Für Fortgeschrittene: Befehlszeile
 
-Alles, was die App kann, geht auch ohne Fenster:
+Alles, was die App kann, geht auch ohne Fenster (im Programmordner ausführen):
 
 ```
-.venv\Scripts\python -m fotosort analysieren "D:\Fotos" [--neu] [--kein-browser] [--ohne-ki]
-.venv\Scripts\python -m fotosort einteilen "D:\Fotos"
-.venv\Scripts\python -m fotosort aussortieren "D:\Fotos" [--ausfuehren]
-.venv\Scripts\python -m fotosort zurueckholen "D:\Fotos" [--datei DSCF1234] [--lauf 2026-10-14_21-00-19] [--alle]
-.venv\Scripts\python -m fotosort loeschen "D:\Fotos"
-.venv\Scripts\python -m fotosort bewerten "D:\Fotos" [--port 8765]
-.venv\Scripts\python -m fotosort trainieren "D:\Fotos"
-.venv\Scripts\python -m fotosort fehlerliste "D:\Fotos"
-.venv\Scripts\python -m fotosort bericht "D:\Fotos"
-.venv\Scripts\python -m fotosort ki-installieren
+python\python.exe -m fotosort analysieren "D:\Fotos" [--neu] [--kein-browser] [--ohne-ki]
+python\python.exe -m fotosort einteilen "D:\Fotos"
+python\python.exe -m fotosort aussortieren "D:\Fotos" [--ausfuehren]
+python\python.exe -m fotosort zurueckholen "D:\Fotos" [--datei DSCF1234] [--lauf 2026-10-14_21-00-19] [--alle]
+python\python.exe -m fotosort loeschen "D:\Fotos"
+python\python.exe -m fotosort bewerten "D:\Fotos" [--port 8765]
+python\python.exe -m fotosort trainieren "D:\Fotos"
+python\python.exe -m fotosort fehlerliste "D:\Fotos"
+python\python.exe -m fotosort bericht "D:\Fotos"
+python\python.exe -m fotosort ki-installieren
 ```
 
 ## Nächste Phasen

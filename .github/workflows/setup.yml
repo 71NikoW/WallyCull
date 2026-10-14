@@ -1,0 +1,114 @@
+# Baut WallyCull-Setup-<Version>.exe und veröffentlicht es als Release, sobald __version__ steigt.
+# Die App sucht beim Start nach dem neuesten Release und installiert es selbst.
+name: Setup bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: setup
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12.10"
+  RCEDIT_URL: https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe
+
+jobs:
+  setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version lesen
+        id: v
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Select-String -Path fotosort/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          gh release view "v$v" *> $null
+          if ($LASTEXITCODE -eq 0 -and "${{ github.event_name }}" -ne "workflow_dispatch") { "bauen=false" >> $env:GITHUB_OUTPUT } else { "bauen=true" >> $env:GITHUB_OUTPUT }
+          Write-Host "Version $v"
+          $global:LASTEXITCODE = 0
+
+      - name: Python mitliefern
+        if: steps.v.outputs.bauen == 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/python/$env:PYTHON_VERSION" -OutFile python.zip
+          Expand-Archive python.zip -DestinationPath nuget
+          New-Item -ItemType Directory -Force build | Out-Null
+          Move-Item nuget/tools build/python
+          $py = "build/python/python.exe"
+          & $py -m pip --version
+          if ($LASTEXITCODE -ne 0) { & $py -m ensurepip --upgrade }
+          & $py -m pip install --upgrade --no-warn-script-location pip
+          & $py -m pip install --no-warn-script-location -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "pip install fehlgeschlagen" }
+          & $py -c "import cv2, numpy, rawpy, PIL, imagehash, yaml, send2trash, psutil, webview; print('Pakete ok')"
+          if ($LASTEXITCODE -ne 0) { throw "Import-Test fehlgeschlagen" }
+          # Selbsttest: Paket lädt, Befehlszeile antwortet
+          & $py -m fotosort --version
+          if ($LASTEXITCODE -ne 0) { throw "fotosort startet nicht" }
+          Get-ChildItem build/python -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+
+      - name: Startprogramm WallyCull.exe mit Symbol
+        if: steps.v.outputs.bauen == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item build/python/pythonw.exe build/python/WallyCull.exe
+          Invoke-WebRequest $env:RCEDIT_URL -OutFile rcedit.exe
+          ./rcedit.exe build/python/WallyCull.exe --set-icon fotosort/symbol.ico `
+            --set-version-string FileDescription WallyCull --set-version-string ProductName WallyCull `
+            --set-version-string CompanyName WallyFrame --set-file-version "${{ steps.v.outputs.version }}" `
+            --set-product-version "${{ steps.v.outputs.version }}"
+          if ($LASTEXITCODE -ne 0) { throw "rcedit fehlgeschlagen" }
+
+      - name: Setup kompilieren
+        if: steps.v.outputs.bauen == 'true'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc /Qp "/DAppVersion=${{ steps.v.outputs.version }}" installer/WallyCull.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC fehlgeschlagen" }
+          Get-ChildItem dist
+
+      - name: Setup testweise still installieren
+        if: steps.v.outputs.bauen == 'true'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/*.exe | Select-Object -First 1
+          # KI-Schritt im Test überspringen: kein GPU-Download auf dem Build-Rechner
+          $env:WALLYCULL_KI_UEBERSPRINGEN = "1"
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=","/LOG=install.log" -Wait
+          $app = "$env:LOCALAPPDATA\Programs\WallyCull"
+          if (-not (Test-Path "$app\python\WallyCull.exe")) { Get-Content install.log -Tail 40; throw "Installation fehlgeschlagen" }
+          Push-Location $app
+          & "$app\python\python.exe" -m fotosort --version
+          if ($LASTEXITCODE -ne 0) { throw "Installierte App startet nicht" }
+          Pop-Location
+          Get-Process WallyCull -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: Release veröffentlichen
+        if: steps.v.outputs.bauen == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.v.outputs.version }}"
+          $datei = "dist/WallyCull-Setup-$v.exe"
+          gh release view "v$v" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "v$v" $datei --clobber
+          } else {
+            $notiz = git log -1 --pretty=%B
+            gh release create "v$v" $datei --title "WallyCull $v" --notes "$notiz" --target $env:GITHUB_SHA
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Release fehlgeschlagen" }

@@ -21,10 +21,9 @@ from PIL import Image
 from tqdm import tqdm
 
 from . import datenbank, einlesen
-from .konfig import PROGRAMM_ORDNER
+from .pfade import BENUTZER_ORDNER, MODELL_ORDNER
 
 KI_VERSION = 1
-MODELL_ORDNER = PROGRAMM_ORDNER / "modelle"
 LAION_URL = (
     "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
 )
@@ -166,7 +165,7 @@ class Modelle:
                 print(f"  Hinweis: {name} nicht verfügbar ({type(e).__name__}: {e}). Läuft ohne weiter.")
 
     def _laion_laden(self) -> list[tuple[np.ndarray, np.ndarray]] | None:
-        MODELL_ORDNER.mkdir(exist_ok=True)
+        MODELL_ORDNER.mkdir(parents=True, exist_ok=True)
         pfad = MODELL_ORDNER / "laion_aesthetic_vit_l14.pth"
         if not pfad.exists():
             print("Lade LAION-Ästhetikmodell (einmalig, ca. 4 MB) ...")
@@ -299,7 +298,7 @@ def lauf(foto_ordner: Path, konfig: dict, neu_berechnen: bool = False) -> dict:
 
     vorbild_ordner = Path(os.path.expandvars(k.get("vorbilder_ordner") or "")).expanduser()
     if k.get("vorbilder_ordner") and not vorbild_ordner.is_absolute():
-        vorbild_ordner = PROGRAMM_ORDNER / vorbild_ordner
+        vorbild_ordner = BENUTZER_ORDNER / vorbild_ordner
     endungen = set(konfig["dateien"]["bild"]) | raw_endungen(konfig)
     hat_vorbilder = vorbild_ordner.is_dir() and any(p.suffix.lower() in endungen for p in vorbild_ordner.rglob("*"))
     braucht_modelle = bool(offen) or hat_vorbilder

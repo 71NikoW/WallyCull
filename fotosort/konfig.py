@@ -7,10 +7,11 @@ from pathlib import Path
 
 import yaml
 
-PROGRAMM_ORDNER = Path(__file__).resolve().parent.parent
+from .pfade import BENUTZER_ORDNER, PROGRAMM_ORDNER
+
 STANDARD_KONFIG = PROGRAMM_ORDNER / "config.yaml"
 # Alles, was dir gehört (eigene Einstellungen, App-Zustand), liegt hier und bleibt bei Updates erhalten.
-DATEN_ORDNER = PROGRAMM_ORDNER / "daten"
+DATEN_ORDNER = BENUTZER_ORDNER
 EIGENE_KONFIG = DATEN_ORDNER / "eigene-einstellungen.yaml"
 
 

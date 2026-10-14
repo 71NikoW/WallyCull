@@ -5,3 +5,5 @@ vorbilder/*
 !vorbilder/LIESMICH.txt
 __pycache__/
 *.pyc
+build/
+dist/
