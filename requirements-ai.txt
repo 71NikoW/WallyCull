@@ -1,0 +1,3 @@
+# AI models: the setup installs them together with PyTorch (matching your graphics card)
+# into %LOCALAPPDATA%\WallyCull\ai-packages
+open_clip_torch>=2.24

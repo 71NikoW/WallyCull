@@ -1,2 +1,0 @@
-# KI-Modelle: das Setup installiert sie samt PyTorch (passend zur Grafikkarte) nach %LOCALAPPDATA%\WallyCull\ki-pakete
-open_clip_torch>=2.24

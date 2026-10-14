@@ -1,6 +1,6 @@
-﻿; WallyCull Setup (Inno Setup 6.3 oder neuer). Gebaut von .github/workflows/setup.yml:
-;   iscc /DAppVersion=0.6.0 installer\WallyCull.iss
-; Erwartet das mitgelieferte Python (samt Paketen) unter build\python.
+﻿; WallyCull setup (Inno Setup 6.3 or newer). Built by .github/workflows/setup.yml:
+;   iscc /DAppVersion=0.7.0 installer\WallyCull.iss
+; Expects the bundled Python (with its packages) in build\python.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -19,12 +19,12 @@ DisableDirPage=auto
 PrivilegesRequired=lowest
 OutputDir=..\dist
 OutputBaseFilename=WallyCull-Setup-{#AppVersion}
-SetupIconFile=..\fotosort\symbol.ico
+SetupIconFile=..\wallycull\icon.ico
 UninstallDisplayIcon={app}\python\WallyCull.exe
 UninstallDisplayName=WallyCull
-Compression=lzma2/ultra64
+; lzma2/max instead of ultra64: ultra64 runs out of memory on the build machine
+Compression=lzma2/max
 SolidCompression=yes
-LZMANumBlockThreads=4
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -35,85 +35,90 @@ VersionInfoVersion={#AppVersion}
 VersionInfoProductName=WallyCull
 
 [Languages]
-Name: "de"; MessagesFile: "compiler:Languages\German.isl"
+Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktop"; Description: "Verknüpfung auf dem Desktop anlegen"; GroupDescription: "Zusätzlich:"
+Name: "desktop"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [InstallDelete]
-; Bei Updates das Programm sauber ersetzen. Deine Daten (%LOCALAPPDATA%\WallyCull) bleiben unberührt.
+; Replace the program cleanly on updates. Your data (%LOCALAPPDATA%\WallyCull) is never touched.
 Type: filesandordirs; Name: "{app}\python"
+Type: filesandordirs; Name: "{app}\wallycull"
+; Left over from the German versions up to 0.6
 Type: filesandordirs; Name: "{app}\fotosort"
+Type: files; Name: "{app}\ANLEITUNG.md"
+Type: files; Name: "{app}\requirements-ki.txt"
 
 [Files]
 Source: "..\build\python\*"; DestDir: "{app}\python"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "..\fotosort\*"; DestDir: "{app}\fotosort"; Excludes: "__pycache__,*.pyc"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\wallycull\*"; DestDir: "{app}\wallycull"; Excludes: "__pycache__,*.pyc"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "..\config.yaml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\requirements-ki.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\ANLEITUNG.md"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\vorbilder\LIESMICH.txt"; DestDir: "{localappdata}\WallyCull\vorbilder"; Flags: onlyifdoesntexist
+Source: "..\requirements-ai.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "references-README.txt"; DestDir: "{localappdata}\WallyCull\references"; DestName: "README.txt"; Flags: onlyifdoesntexist
 
 [Icons]
-Name: "{autoprograms}\WallyCull"; Filename: "{app}\python\WallyCull.exe"; Parameters: "-m fotosort"; WorkingDir: "{app}"; IconFilename: "{app}\fotosort\symbol.ico"; AppUserModelID: "WallyFrame.WallyCull"; Comment: "Fotos nach Qualität und Wert sortieren"
-Name: "{autodesktop}\WallyCull"; Filename: "{app}\python\WallyCull.exe"; Parameters: "-m fotosort"; WorkingDir: "{app}"; IconFilename: "{app}\fotosort\symbol.ico"; AppUserModelID: "WallyFrame.WallyCull"; Comment: "Fotos nach Qualität und Wert sortieren"; Tasks: desktop
+Name: "{autoprograms}\WallyCull"; Filename: "{app}\python\WallyCull.exe"; Parameters: "-m wallycull"; WorkingDir: "{app}"; IconFilename: "{app}\wallycull\icon.ico"; AppUserModelID: "WallyFrame.WallyCull"; Comment: "Sort photos by quality and value"
+Name: "{autodesktop}\WallyCull"; Filename: "{app}\python\WallyCull.exe"; Parameters: "-m wallycull"; WorkingDir: "{app}"; IconFilename: "{app}\wallycull\icon.ico"; AppUserModelID: "WallyFrame.WallyCull"; Comment: "Sort photos by quality and value"; Tasks: desktop
 
 [Run]
-Filename: "{app}\python\WallyCull.exe"; Parameters: "-m fotosort"; WorkingDir: "{app}"; Description: "WallyCull jetzt starten"; Flags: postinstall nowait
+Filename: "{app}\python\WallyCull.exe"; Parameters: "-m wallycull"; WorkingDir: "{app}"; Description: "Start WallyCull now"; Flags: postinstall nowait
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
 [Code]
 var
-  KiSeite: TOutputProgressWizardPage;
-  KiSchritt: String;
+  AiPage: TOutputProgressWizardPage;
+  AiStep: String;
 
-procedure KiAusgabe(const S: String; const Error, FirstLine: Boolean);
+procedure AiOutput(const S: String; const Error, FirstLine: Boolean);
 var
-  Zeile: String;
+  Line: String;
 begin
-  Zeile := Trim(S);
-  if Zeile = '' then
+  Line := Trim(S);
+  if Line = '' then
     Exit;
-  if Pos('SCHRITT ', Zeile) = 1 then
-    KiSchritt := Copy(Zeile, 9, Length(Zeile) - 8);
-  KiSeite.SetText(KiSchritt, Zeile);
+  if Pos('STEP ', Line) = 1 then
+    AiStep := Copy(Line, 6, Length(Line) - 5);
+  AiPage.SetText(AiStep, Line);
 end;
 
-procedure KiEinrichten;
+procedure SetUpAi;
 var
-  Ergebnis: Integer;
+  ResultCode: Integer;
   Python: String;
   Ok: Boolean;
 begin
   Python := ExpandConstant('{app}\python\python.exe');
   if WizardSilent then
   begin
-    { Update im Hintergrund: prüft nur, ob die KI-Pakete noch passen, und ergänzt sie bei Bedarf }
-    Exec(Python, '-u -m fotosort ki-installieren', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, Ergebnis);
+    { Update in the background: only checks that the AI packages still match and adds them if needed }
+    Exec(Python, '-u -m wallycull setup-ai', ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
     Exit;
   end;
-  KiSchritt := 'KI wird vorbereitet ...';
-  KiSeite := CreateOutputProgressPage('KI wird eingerichtet',
-    'WallyCull lädt PyTorch für deine Grafikkarte, CLIP und die Bewertungsmodelle (einmalig ca. 5 GB). ' +
-    'Je nach Internetverbindung dauert das einige Minuten. Alles läuft danach offline auf deinem PC.');
-  KiSeite.Show;
+  AiStep := 'Preparing the AI ...';
+  AiPage := CreateOutputProgressPage('Setting up the AI',
+    'WallyCull downloads PyTorch for your graphics card, CLIP and the rating models (once, about 5 GB). ' +
+    'Depending on your internet connection this takes a few minutes. Afterwards everything runs offline on your PC.');
+  AiPage.Show;
   try
-    KiSeite.ProgressBar.Style := npbstMarquee;
-    Ok := ExecAndLogOutput(Python, '-u -m fotosort ki-installieren', ExpandConstant('{app}'), SW_HIDE,
-      ewWaitUntilTerminated, Ergebnis, @KiAusgabe);
-    if (not Ok) or (Ergebnis <> 0) then
-      MsgBox('Die KI konnte nicht vollständig eingerichtet werden (Code ' + IntToStr(Ergebnis) + ').' + #13#10 +
-        'WallyCull funktioniert trotzdem. In der App kannst du es rechts unter "KI einrichten" erneut versuchen.',
+    AiPage.ProgressBar.Style := npbstMarquee;
+    Ok := ExecAndLogOutput(Python, '-u -m wallycull setup-ai', ExpandConstant('{app}'), SW_HIDE,
+      ewWaitUntilTerminated, ResultCode, @AiOutput);
+    if (not Ok) or (ResultCode <> 0) then
+      MsgBox('The AI could not be set up completely (code ' + IntToStr(ResultCode) + ').' + #13#10 +
+        'WallyCull still works. You can try again in the app with "Set up AI" on the right.',
         mbInformation, MB_OK);
   finally
-    KiSeite.Hide;
+    AiPage.Hide;
   end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
-    KiEinrichten;
+    SetUpAi;
 end;

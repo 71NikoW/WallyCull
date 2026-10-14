@@ -1,163 +1,162 @@
 # =====================================================================
-#  WallyCull – Einstellungen
-#  Alle Schwellenwerte und Gewichtungen lassen sich hier anpassen.
-#  Nach einer Änderung einfach "analysieren" erneut starten: die teuren
-#  Messungen kommen aus dem Cache, nur die Einteilung wird neu berechnet.
+#  WallyCull settings (defaults)
+#
+#  Don't edit this file: updates replace it. Put the values you want to
+#  change into %LOCALAPPDATA%\WallyCull\settings.yaml instead, with the
+#  same structure, e.g.
+#
+#      classification:
+#        strictness: 0.7
+#
+#  After a change, run "Analyze" again: the expensive measurements come
+#  from the cache, only the classification is computed again.
 # =====================================================================
 
-allgemein:
-  # Anzahl paralleler Prozesse. 0 = automatisch (CPU-Kerne minus 2,
-  # damit der PC nebenbei flüssig bleibt).
-  arbeiter: 0
-  # Läuft mit niedriger Priorität im Hintergrund (empfohlen).
-  niedrige_prioritaet: true
-  # Bilder werden für die Messungen auf diese Kantenlänge verkleinert.
-  # Alle Schärfe-Grenzwerte unten beziehen sich auf diese Größe.
-  analyse_kantenlaenge: 1600
-  # Schärfe zusätzlich in der 100-%-Ansicht aus voller Auflösung prüfen
-  # (Kamera-JPG in voller Größe bzw. vollständig entwickeltes RAW). Langsamer, aber
-  # entscheidend für große Wandbilder. false = nur verkleinerte Vorschau (schnell).
-  volle_aufloesung: true
-  # Die Schärfe wird einheitlich bei dieser Bildgröße gemessen (lange Kante in Pixeln,
-  # 4000 px entsprechen ca. 50 cm Druckbreite bei 200 dpi).
-  schaerfe_referenz_kante: 4000
-  # RAW immer vollständig entwickeln statt das eingebettete Kamera-JPG zu nehmen.
-  # Bei der X-T5 unnötig (Vorschau ist 4416 px groß), aber deutlich langsamer.
-  raw_entwickeln: false
-  # Größe der Vorschaubilder für den Bericht (Pixel, lange Kante).
-  vorschau_kantenlaenge: 480
+general:
+  # Number of parallel processes. 0 = automatic (CPU cores minus 2, so the PC stays responsive).
+  workers: 0
+  # Run with low priority in the background (recommended).
+  low_priority: true
+  # Images are scaled to this long edge (pixels) for the measurements.
+  # All sharpness thresholds below refer to this size.
+  analysis_size: 1600
+  # Also check sharpness at 100% from the full resolution (full-size camera JPG or a fully
+  # developed RAW). Slower, but essential for large wall art. false = small preview only (fast).
+  full_resolution: true
+  # Sharpness is always measured at this image size (long edge in pixels;
+  # 4000 px is about 50 cm print width at 200 dpi).
+  sharpness_reference_size: 4000
+  # Always fully develop RAW files instead of using the embedded camera JPG.
+  # Unnecessary for the X-T5 (its preview is 4416 px), and much slower.
+  develop_raw: false
+  # Size of the preview images in the report (pixels, long edge).
+  preview_size: 480
 
-dateien:
+files:
   raw: [.raf, .cr2, .cr3, .nef, .arw, .dng, .orf, .rw2, .pef]
-  bild: [.jpg, .jpeg, .png, .tif, .tiff, .webp]
-  # Begleitdateien werden nicht analysiert, aber immer mit verschoben.
-  begleit: [.xmp, .pp3, .dop]
-  # Diese Ordner werden beim Einlesen übersprungen.
-  ignorierte_ordner: [_aussortiert, .fotosort, "$RECYCLE.BIN", "System Volume Information"]
-  # Name des Ordners für aussortierte Bilder (liegt im Foto-Hauptordner).
-  aussortiert_ordner: _aussortiert
+  image: [.jpg, .jpeg, .png, .tif, .tiff, .webp]
+  # Sidecar files are not analyzed, but always moved together with their image.
+  sidecar: [.xmp, .pp3, .dop]
+  # These folders are skipped when scanning (folders starting with "." always are).
+  ignored_folders: [_rejected, _aussortiert, "$RECYCLE.BIN", "System Volume Information"]
+  # Name of the folder for rejected images (inside the photo folder).
+  rejected_folder: _rejected
 
-qualitaet:
-  # Schärfe = Laplace-Varianz auf dem Motiv (Gesicht oder auffälligster
-  # Bildbereich). Unter "unscharf" gilt das Motiv als unscharf,
-  # ab "scharf" als voll scharf. Dazwischen wird weich übergeblendet.
-  schaerfe_unscharf: 25
-  schaerfe_scharf: 250
-  # Gesichter sind glatt und haben weniger Kanten: ihr Messwert wird
-  # mit diesem Faktor hochgerechnet.
-  gesicht_faktor: 2.5
+quality:
+  # Sharpness = Laplacian variance on the subject (face or most salient area).
+  # Below "blurry" the subject counts as blurry, from "sharp" as fully sharp; smooth blend in between.
+  sharpness_blurry: 25
+  sharpness_sharp: 250
+  # Faces are smooth and have fewer edges: their value is multiplied by this factor.
+  face_factor: 2.5
 
-  # Detailschärfe: Breite der Kanten in Pixeln an den schärfsten Stellen des Motivs,
-  # gemessen bei schaerfe_referenz_kante (ca. 1 = knackscharf, 2 = sichtbar weich, 3+ = unscharf).
-  # Bis "scharf" volle Punktzahl, ab "unscharf" null.
-  kantenbreite_scharf: 1.1
-  kantenbreite_unscharf: 2.0
+  # Fine detail: edge width in pixels at the sharpest spots of the subject, measured at
+  # sharpness_reference_size (about 1 = tack sharp, 2 = visibly soft, 3+ = blurry).
+  # Full score up to "sharp", zero from "blurry".
+  edge_width_sharp: 1.1
+  edge_width_blurry: 2.0
 
-  # Überbelichtung: Anteil ausgefressener Pixel (0.02 = 2 %).
-  ueber_ok: 0.02
-  ueber_schlecht: 0.20
-  # Unterbelichtung: Anteil abgesoffener Pixel.
-  unter_ok: 0.10
-  unter_schlecht: 0.55
-  # Bei erkannten Nachtaufnahmen gilt dieser großzügigere Grenzwert.
-  unter_schlecht_nacht: 0.92
+  # Overexposure: share of blown-out pixels (0.02 = 2%).
+  overexposed_ok: 0.02
+  overexposed_bad: 0.20
+  # Underexposure: share of crushed pixels.
+  underexposed_ok: 0.10
+  underexposed_bad: 0.55
+  # More generous limit for detected night shots.
+  underexposed_bad_night: 0.92
 
-  # Rauschen: geschätzte Standardabweichung in glatten Flächen.
-  rauschen_ok: 2.0
-  rauschen_schlecht: 7.0
+  # Noise: estimated standard deviation in smooth areas.
+  noise_ok: 2.0
+  noise_bad: 7.0
 
-  # Verwacklung: Kanten in Bewegungsrichtung sind um diesen Faktor breiter als quer dazu.
-  verwacklung_verhaeltnis: 2.0
-  # ... und die breiteste Richtung muss mindestens so breit sein (Pixel), sonst ist es nur Bildstruktur.
-  verwacklung_min_breite: 1.8
-  # ... und das Motiv insgesamt muss sichtbar weich sein (Kantenbreite in Pixeln).
-  verwacklung_min_kantenbreite: 1.3
-  # Grobe Ersatzmessung, falls keine Detailschärfe möglich ist (0 = keine, 1 = extrem).
-  verwacklung_grenze: 0.55
+  # Camera shake: edges along the motion are this many times wider than across it ...
+  shake_ratio: 2.0
+  # ... the widest direction is at least this wide (pixels), otherwise it is just image structure ...
+  shake_min_width: 1.8
+  # ... and the subject is visibly soft overall (edge width in pixels).
+  shake_min_edge_width: 1.3
+  # Rough fallback when no fine-detail measurement is possible (0 = none, 1 = extreme).
+  shake_limit: 0.55
 
-  # Unter dieser Auflösung (Megapixel) gilt ein Bild als zu klein für Wandbilder.
-  wandbild_min_megapixel: 8
-  # Druckauflösung für die Angabe der maximalen Wandbild-Größe.
-  druck_dpi: 200
+  # Below this resolution (megapixels) an image is too small for wall art.
+  wallart_min_megapixels: 8
+  # Print resolution used for the maximum wall-art size.
+  print_dpi: 200
 
-  # Gewichtung der Teilnoten im Qualitäts-Score.
-  gewichte:
-    schaerfe: 0.40
-    belichtung: 0.25
-    rauschen: 0.15
-    verwacklung: 0.10
-    aufloesung: 0.10
+  # Weights of the partial scores in the quality score.
+  weights:
+    sharpness: 0.40
+    exposure: 0.25
+    noise: 0.15
+    shake: 0.10
+    resolution: 0.10
 
-duplikate:
-  # Hamming-Abstand der Wahrnehmungs-Hashes (0 = identisch, 64 = völlig anders).
-  # Duplikat = praktisch identisches Bild (Kopie, gleiche Aufnahme). Davon bleibt nur eines.
-  duplikat_abstand: 2
-  serie_abstand: 12
-  # Bilder einer Serie müssen innerhalb dieser Sekunden aufgenommen sein.
-  # Ohne Aufnahmezeit zählt nur der (strengere) Duplikat-Abstand.
-  serie_sekunden: 30
-  # Aus jeder Serie werden bis zu so viele Bilder behalten, wenn sie wirklich gut sind.
-  # Das beste Bild bleibt immer.
-  serie_behalten: 3
-  # "Wirklich gut" heißt: mindestens dieser Qualitäts-Score und kein deutlicher Mangel.
-  serie_gut_ab: 0.75
-  # Serienbilder, deren Qualität höchstens so viel schlechter ist als das
-  # beste Bild, landen in "Prüfen" statt in "Aussortiert".
-  serie_toleranz: 0.03
+duplicates:
+  # Hamming distance of the perceptual hashes (0 = identical, 64 = completely different).
+  # Duplicate = practically the same image (copy, same shot). Only one of them stays.
+  duplicate_distance: 2
+  burst_distance: 12
+  # Images of a burst must be taken within this many seconds.
+  # Without a capture time only the (stricter) duplicate distance counts.
+  burst_seconds: 30
+  # Up to this many images of a burst are kept if they are really good. The best one always stays.
+  burst_keep: 3
+  # "Really good" means at least this quality score and no clear flaw.
+  burst_good_from: 0.75
+  # Burst shots at most this much worse than the best one go to "Review" instead of "Reject".
+  burst_tolerance: 0.03
 
-einteilung:
-  # Strenge 0.0 (sehr nachsichtig) bis 1.0 (sehr streng). 0.5 = normal.
-  strenge: 0.5
-  # Ab diesem Qualitäts-Score: Highlight-Kandidat ...
-  highlight_ab: 0.80
-  # ... und nur, wenn es zu diesem besten Anteil aller Bilder gehört (0.15 = beste 15 %).
-  highlight_top_anteil: 0.15
-  # Hat ein Bild einen deutlichen Mangel (eine Teilnote unter diesem Wert), landet es
-  # mindestens in "Prüfen" statt in "Behalten".
-  mangel_unter: 0.5
-  # Unter diesem Qualitäts-Score: "Prüfen".
-  pruefen_unter: 0.45
-  # Unter diesem Qualitäts-Score: Fehlschuss, wird aussortiert.
-  # (Solange es noch keinen Wert-Score gibt – ab Phase 2/3 entscheidet die Matrix.)
-  aussortiert_unter: 0.15
-  # Wert-Score ab hier = "hoher Wert" (ab Phase 2).
-  wert_hoch_ab: 0.5
+classification:
+  # Strictness from 0.0 (very lenient) to 1.0 (very strict). 0.5 = normal.
+  strictness: 0.5
+  # From this quality score an image is a highlight candidate ...
+  highlight_from: 0.80
+  # ... but only among this best share of all images (0.15 = best 15%).
+  highlight_top_share: 0.15
+  # An image with a clear flaw (one partial score below this) goes at least to "Review".
+  flaw_below: 0.5
+  # Below this quality score: "Review".
+  review_below: 0.45
+  # Below this quality score: failed shot, rejected (only while there is no value score).
+  reject_below: 0.15
+  # Value score from here on = "high value".
+  value_high_from: 0.5
 
-lernen:
-  # Ab so vielen Bewertungen (und je Seite mindestens min_je_seite) wird ein Modell trainiert.
-  min_bewertungen: 40
-  min_je_seite: 10
-  # Nach so vielen neuen Bewertungen wird automatisch neu trainiert.
-  neu_trainieren_alle: 10
-  # Stärke der Regularisierung (höher = vorsichtigeres Modell).
-  regularisierung: 3.0
-  # Anteil zufälliger Bilder beim aktiven Lernen (Rest: unsicherste Bilder zuerst).
-  zufallsanteil: 0.25
-  # Einteilung nach der Prognose deines Modells (Wahrscheinlichkeit "behalten"):
-  aussortiert_unter: 0.15
-  pruefen_unter: 0.45
-  highlight_ab: 0.80
-  # Serienbilder ab dieser Prognose zählen als "wirklich gut".
-  serie_gut_ab: 0.65
+learning:
+  # From this many ratings (and at least min_per_side on each side) a model is trained.
+  min_ratings: 40
+  min_per_side: 10
+  # Retrain automatically after this many new ratings.
+  retrain_every: 10
+  # Regularization strength (higher = more cautious model).
+  regularization: 3.0
+  # Share of random images in active learning (the rest: least certain images first).
+  random_share: 0.25
+  # Classification by your model's prediction (probability of "keep"):
+  reject_below: 0.15
+  review_below: 0.45
+  highlight_from: 0.80
+  # Burst shots from this prediction count as "really good".
+  burst_good_from: 0.65
 
-ki:
-  # Phase 2: fertig trainierte KI-Modelle (in der App: "KI installieren"). false = aus.
-  aktiv: true
-  # auto = Grafikkarte, falls vorhanden, sonst CPU. Alternativ: cuda oder cpu.
-  geraet: auto
-  clip_modell: ViT-L-14
-  clip_gewichte: openai
-  # Zusätzliche Modelle aus der Bibliothek pyiqa (optional, leere Liste = aus).
-  pyiqa_modelle: [musiq, nima]
-  # Bilder pro Durchgang auf der Grafikkarte.
-  stapel: 16
-  # Ordner mit Vorbildern (Bilder, die für dich gute Wandbilder sind). Relativ zum Programmordner
-  # oder als vollständiger Pfad. Leer lassen = keine Vorbilder.
-  vorbilder_ordner: vorbilder
-  # Zusammensetzung des Wert-Scores, solange dein persönliches Modell noch nicht trainiert ist.
-  wert_gewichte:
-    aesthetik: 0.35
-    wandbild: 0.25
-    vorbild: 0.25
-    inhalt: 0.10
+ai:
+  # Pretrained AI models (set up by the installer, or in the app: "Set up AI"). false = off.
+  enabled: true
+  # auto = graphics card if available, otherwise CPU. Alternatively: cuda or cpu.
+  device: auto
+  clip_model: ViT-L-14
+  clip_weights: openai
+  # Extra models from the pyiqa library (optional, empty list = off).
+  pyiqa_models: [musiq, nima]
+  # Images per batch on the graphics card.
+  batch_size: 16
+  # Folder with reference images (images you consider great wall art). Relative to your data
+  # folder (%LOCALAPPDATA%\WallyCull) or a full path. Empty = no references.
+  references_folder: references
+  # How the value score is put together while your personal model is not trained yet.
+  value_weights:
+    aesthetic: 0.35
+    wallart: 0.25
+    reference: 0.25
+    content: 0.10
     nima: 0.05
