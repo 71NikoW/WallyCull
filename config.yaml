@@ -1,0 +1,163 @@
+# =====================================================================
+#  WallyCull – Einstellungen
+#  Alle Schwellenwerte und Gewichtungen lassen sich hier anpassen.
+#  Nach einer Änderung einfach "analysieren" erneut starten: die teuren
+#  Messungen kommen aus dem Cache, nur die Einteilung wird neu berechnet.
+# =====================================================================
+
+allgemein:
+  # Anzahl paralleler Prozesse. 0 = automatisch (CPU-Kerne minus 2,
+  # damit der PC nebenbei flüssig bleibt).
+  arbeiter: 0
+  # Läuft mit niedriger Priorität im Hintergrund (empfohlen).
+  niedrige_prioritaet: true
+  # Bilder werden für die Messungen auf diese Kantenlänge verkleinert.
+  # Alle Schärfe-Grenzwerte unten beziehen sich auf diese Größe.
+  analyse_kantenlaenge: 1600
+  # Schärfe zusätzlich in der 100-%-Ansicht aus voller Auflösung prüfen
+  # (Kamera-JPG in voller Größe bzw. vollständig entwickeltes RAW). Langsamer, aber
+  # entscheidend für große Wandbilder. false = nur verkleinerte Vorschau (schnell).
+  volle_aufloesung: true
+  # Die Schärfe wird einheitlich bei dieser Bildgröße gemessen (lange Kante in Pixeln,
+  # 4000 px entsprechen ca. 50 cm Druckbreite bei 200 dpi).
+  schaerfe_referenz_kante: 4000
+  # RAW immer vollständig entwickeln statt das eingebettete Kamera-JPG zu nehmen.
+  # Bei der X-T5 unnötig (Vorschau ist 4416 px groß), aber deutlich langsamer.
+  raw_entwickeln: false
+  # Größe der Vorschaubilder für den Bericht (Pixel, lange Kante).
+  vorschau_kantenlaenge: 480
+
+dateien:
+  raw: [.raf, .cr2, .cr3, .nef, .arw, .dng, .orf, .rw2, .pef]
+  bild: [.jpg, .jpeg, .png, .tif, .tiff, .webp]
+  # Begleitdateien werden nicht analysiert, aber immer mit verschoben.
+  begleit: [.xmp, .pp3, .dop]
+  # Diese Ordner werden beim Einlesen übersprungen.
+  ignorierte_ordner: [_aussortiert, .fotosort, "$RECYCLE.BIN", "System Volume Information"]
+  # Name des Ordners für aussortierte Bilder (liegt im Foto-Hauptordner).
+  aussortiert_ordner: _aussortiert
+
+qualitaet:
+  # Schärfe = Laplace-Varianz auf dem Motiv (Gesicht oder auffälligster
+  # Bildbereich). Unter "unscharf" gilt das Motiv als unscharf,
+  # ab "scharf" als voll scharf. Dazwischen wird weich übergeblendet.
+  schaerfe_unscharf: 25
+  schaerfe_scharf: 250
+  # Gesichter sind glatt und haben weniger Kanten: ihr Messwert wird
+  # mit diesem Faktor hochgerechnet.
+  gesicht_faktor: 2.5
+
+  # Detailschärfe: Breite der Kanten in Pixeln an den schärfsten Stellen des Motivs,
+  # gemessen bei schaerfe_referenz_kante (ca. 1 = knackscharf, 2 = sichtbar weich, 3+ = unscharf).
+  # Bis "scharf" volle Punktzahl, ab "unscharf" null.
+  kantenbreite_scharf: 1.1
+  kantenbreite_unscharf: 2.0
+
+  # Überbelichtung: Anteil ausgefressener Pixel (0.02 = 2 %).
+  ueber_ok: 0.02
+  ueber_schlecht: 0.20
+  # Unterbelichtung: Anteil abgesoffener Pixel.
+  unter_ok: 0.10
+  unter_schlecht: 0.55
+  # Bei erkannten Nachtaufnahmen gilt dieser großzügigere Grenzwert.
+  unter_schlecht_nacht: 0.92
+
+  # Rauschen: geschätzte Standardabweichung in glatten Flächen.
+  rauschen_ok: 2.0
+  rauschen_schlecht: 7.0
+
+  # Verwacklung: Kanten in Bewegungsrichtung sind um diesen Faktor breiter als quer dazu.
+  verwacklung_verhaeltnis: 2.0
+  # ... und die breiteste Richtung muss mindestens so breit sein (Pixel), sonst ist es nur Bildstruktur.
+  verwacklung_min_breite: 1.8
+  # ... und das Motiv insgesamt muss sichtbar weich sein (Kantenbreite in Pixeln).
+  verwacklung_min_kantenbreite: 1.3
+  # Grobe Ersatzmessung, falls keine Detailschärfe möglich ist (0 = keine, 1 = extrem).
+  verwacklung_grenze: 0.55
+
+  # Unter dieser Auflösung (Megapixel) gilt ein Bild als zu klein für Wandbilder.
+  wandbild_min_megapixel: 8
+  # Druckauflösung für die Angabe der maximalen Wandbild-Größe.
+  druck_dpi: 200
+
+  # Gewichtung der Teilnoten im Qualitäts-Score.
+  gewichte:
+    schaerfe: 0.40
+    belichtung: 0.25
+    rauschen: 0.15
+    verwacklung: 0.10
+    aufloesung: 0.10
+
+duplikate:
+  # Hamming-Abstand der Wahrnehmungs-Hashes (0 = identisch, 64 = völlig anders).
+  # Duplikat = praktisch identisches Bild (Kopie, gleiche Aufnahme). Davon bleibt nur eines.
+  duplikat_abstand: 2
+  serie_abstand: 12
+  # Bilder einer Serie müssen innerhalb dieser Sekunden aufgenommen sein.
+  # Ohne Aufnahmezeit zählt nur der (strengere) Duplikat-Abstand.
+  serie_sekunden: 30
+  # Aus jeder Serie werden bis zu so viele Bilder behalten, wenn sie wirklich gut sind.
+  # Das beste Bild bleibt immer.
+  serie_behalten: 3
+  # "Wirklich gut" heißt: mindestens dieser Qualitäts-Score und kein deutlicher Mangel.
+  serie_gut_ab: 0.75
+  # Serienbilder, deren Qualität höchstens so viel schlechter ist als das
+  # beste Bild, landen in "Prüfen" statt in "Aussortiert".
+  serie_toleranz: 0.03
+
+einteilung:
+  # Strenge 0.0 (sehr nachsichtig) bis 1.0 (sehr streng). 0.5 = normal.
+  strenge: 0.5
+  # Ab diesem Qualitäts-Score: Highlight-Kandidat ...
+  highlight_ab: 0.80
+  # ... und nur, wenn es zu diesem besten Anteil aller Bilder gehört (0.15 = beste 15 %).
+  highlight_top_anteil: 0.15
+  # Hat ein Bild einen deutlichen Mangel (eine Teilnote unter diesem Wert), landet es
+  # mindestens in "Prüfen" statt in "Behalten".
+  mangel_unter: 0.5
+  # Unter diesem Qualitäts-Score: "Prüfen".
+  pruefen_unter: 0.45
+  # Unter diesem Qualitäts-Score: Fehlschuss, wird aussortiert.
+  # (Solange es noch keinen Wert-Score gibt – ab Phase 2/3 entscheidet die Matrix.)
+  aussortiert_unter: 0.15
+  # Wert-Score ab hier = "hoher Wert" (ab Phase 2).
+  wert_hoch_ab: 0.5
+
+lernen:
+  # Ab so vielen Bewertungen (und je Seite mindestens min_je_seite) wird ein Modell trainiert.
+  min_bewertungen: 40
+  min_je_seite: 10
+  # Nach so vielen neuen Bewertungen wird automatisch neu trainiert.
+  neu_trainieren_alle: 10
+  # Stärke der Regularisierung (höher = vorsichtigeres Modell).
+  regularisierung: 3.0
+  # Anteil zufälliger Bilder beim aktiven Lernen (Rest: unsicherste Bilder zuerst).
+  zufallsanteil: 0.25
+  # Einteilung nach der Prognose deines Modells (Wahrscheinlichkeit "behalten"):
+  aussortiert_unter: 0.15
+  pruefen_unter: 0.45
+  highlight_ab: 0.80
+  # Serienbilder ab dieser Prognose zählen als "wirklich gut".
+  serie_gut_ab: 0.65
+
+ki:
+  # Phase 2: fertig trainierte KI-Modelle (in der App: "KI installieren"). false = aus.
+  aktiv: true
+  # auto = Grafikkarte, falls vorhanden, sonst CPU. Alternativ: cuda oder cpu.
+  geraet: auto
+  clip_modell: ViT-L-14
+  clip_gewichte: openai
+  # Zusätzliche Modelle aus der Bibliothek pyiqa (optional, leere Liste = aus).
+  pyiqa_modelle: [musiq, nima]
+  # Bilder pro Durchgang auf der Grafikkarte.
+  stapel: 16
+  # Ordner mit Vorbildern (Bilder, die für dich gute Wandbilder sind). Relativ zum Programmordner
+  # oder als vollständiger Pfad. Leer lassen = keine Vorbilder.
+  vorbilder_ordner: vorbilder
+  # Zusammensetzung des Wert-Scores, solange dein persönliches Modell noch nicht trainiert ist.
+  wert_gewichte:
+    aesthetik: 0.35
+    wandbild: 0.25
+    vorbild: 0.25
+    inhalt: 0.10
+    nima: 0.05

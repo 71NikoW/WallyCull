@@ -1,0 +1,10 @@
+# Phase 1 – klassische Bildanalyse, läuft komplett lokal auf der CPU
+opencv-python>=4.9,<5
+numpy>=1.26
+Pillow>=10.0
+rawpy>=0.19
+ImageHash>=4.3
+PyYAML>=6.0
+tqdm>=4.66
+Send2Trash>=1.8
+psutil>=5.9
