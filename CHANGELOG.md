@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 - 2026-10-14
+## 0.7.0 - 2026-10-15
 
 - Everything is in English now: app, rating screen, report, setup, settings and command line.
 - New documentation: README, user guide and developer notes.

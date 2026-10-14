@@ -21,6 +21,7 @@ env:
 jobs:
   setup:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -95,13 +96,22 @@ jobs:
           $setup = Get-ChildItem dist/*.exe | Select-Object -First 1
           # Skip the AI step in the test: no GPU download on the build machine
           $env:WALLYCULL_SKIP_AI = "1"
-          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=","/LOG=install.log" -Wait
+          # Wait for the setup only: -Wait would also wait for the app the setup starts at the end
+          $p = Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/TASKS=","/LOG=install.log" -PassThru
+          if (-not $p.WaitForExit(900000)) { Get-Content install.log -Tail 40; throw "setup did not finish" }
           $app = "$env:LOCALAPPDATA\Programs\WallyCull"
           if (-not (Test-Path "$app\python\WallyCull.exe")) { Get-Content install.log -Tail 40; throw "installation failed" }
           Push-Location $app
           & "$app\python\python.exe" -m wallycull --version
           if ($LASTEXITCODE -ne 0) { throw "installed app does not start" }
           Pop-Location
+          # The setup starts the app at the end: its local server should answer
+          $state = $null
+          foreach ($i in 1..30) {
+            try { $state = Invoke-RestMethod http://127.0.0.1:8765/api/state -TimeoutSec 2; break } catch { Start-Sleep 2 }
+          }
+          if ($state) { Write-Host "App answered: version $($state.version)" }
+          else { Write-Host "::warning::The installed app did not answer (no desktop session on the build machine?)"; Get-Content "$env:LOCALAPPDATA\WallyCull\app.log" -ErrorAction SilentlyContinue }
           Get-Process WallyCull -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Publish release
