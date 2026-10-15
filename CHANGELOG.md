@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1 - 2026-10-15
+
+- Fixed: a damaged WallyCull database in a photo folder (e.g. after the memory card was pulled out while
+  writing) stopped the analysis with "file is not a database". It is now kept aside as
+  `.wallycull\wallycull.db.damaged-<date>` and a fresh one is started. Your photos are not touched.
+
 ## 0.9.0 - 2026-10-15
 
 - **Faster analysis.** Large camera JPGs and RAW previews are decoded about 3x faster: the full-resolution

@@ -7,6 +7,7 @@ to the photo folder, so a changed drive letter breaks nothing.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import sqlite3
 from pathlib import Path
 
@@ -97,13 +98,47 @@ def db_path(photo_dir: Path) -> Path:
     return Path(photo_dir) / DATA_DIR_NAME / DB_NAME
 
 
+def _connect(path: Path) -> sqlite3.Connection:
+    db = sqlite3.connect(path)
+    db.row_factory = sqlite3.Row
+    try:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.executescript(SCHEMA)
+    except sqlite3.DatabaseError:
+        db.close()
+        raise
+    return db
+
+
+def _set_aside(path: Path) -> Path:
+    """Renames a damaged database (and its journal files) so a fresh one can be started. Nothing is deleted."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.name}.damaged-{stamp}")
+    for suffix in ("", "-wal", "-shm"):
+        part = path.with_name(path.name + suffix)
+        try:
+            part.rename(target.with_name(target.name + suffix))
+        except FileNotFoundError:
+            pass  # not there (or another WallyCull process was quicker)
+    return target
+
+
 def open_db(photo_dir: Path) -> sqlite3.Connection:
     path = data_dir(photo_dir) / DB_NAME
     is_new = not path.exists()
-    db = sqlite3.connect(path)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
-    db.executescript(SCHEMA)
+    try:
+        db = _connect(path)
+    except sqlite3.DatabaseError as error:
+        # Damaged, e.g. after the memory card was pulled out while writing: keep it aside, start fresh.
+        # The measurements are simply made again; the old file stays for a rescue of the ratings.
+        try:
+            target = _set_aside(path)
+        except OSError:
+            raise RuntimeError(f"The WallyCull database in this folder is damaged ({error}) and still in use. "
+                               "Close other WallyCull windows and try again.") from error
+        print(f"Note: the WallyCull database in this folder was damaged ({error}). "
+              f"It was kept as {target.name}, and a new one was started; the photos are analyzed again.", flush=True)
+        db, is_new = _connect(path), True
     if is_new:
         _migrate_legacy(Path(photo_dir), db)
     return db

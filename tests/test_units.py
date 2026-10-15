@@ -43,8 +43,9 @@ def test_fast_jpeg_load_keeps_full_resolution_brightness(tmp_path):
 
 
 def test_iqa_batches_by_size_with_same_scores():
-    import numpy as np
-    import torch
+    import pytest
+
+    torch = pytest.importorskip("torch")  # AI packages are optional
     from PIL import Image
 
     from wallycull import ai
@@ -89,3 +90,17 @@ def test_preload_hands_over_models_and_errors(monkeypatch):
 
     with pytest.raises(RuntimeError):
         ai.Preload({})()
+
+
+def test_damaged_database_is_set_aside(tmp_path):
+    from wallycull import database
+
+    folder = tmp_path / database.DATA_DIR_NAME
+    folder.mkdir()
+    (folder / database.DB_NAME).write_bytes(b"\x00" * 4096)  # e.g. memory card pulled while writing
+    (folder / (database.DB_NAME + "-wal")).write_bytes(b"junk")
+    db = database.open_db(tmp_path)
+    assert db.execute("SELECT COUNT(*) FROM images").fetchone()[0] == 0
+    db.close()
+    kept = sorted(p.name for p in folder.iterdir() if ".damaged-" in p.name)
+    assert kept and kept[0].startswith(database.DB_NAME + ".damaged-")
