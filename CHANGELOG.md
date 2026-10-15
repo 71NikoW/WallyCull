@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1 - 2026-10-15
+
+- Two more motorsport checks, from a review of your own photos: something right in front of the car
+  (pole, fence, loudspeaker, crane), and a car that is far too small in the frame. These were the most
+  common reasons for bad shots.
+
 ## 0.10.0 - 2026-10-15
 
 - **Understands race track photos.** The AI now asks motorsport questions about every photo, based on

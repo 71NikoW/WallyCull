@@ -55,10 +55,13 @@ FEATURES = [
     ("ms_action", "racing action (AI)"),
     ("ms_background", "clean background (AI)"),
     ("ms_light", "dramatic light (AI)"),
+    ("ms_clear_view", "clear view of the car (AI)"),
+    ("ms_car_size", "car large in the frame (AI)"),
 ]
 # Plus a number of principal components of the CLIP image features ("subject and style"); the training
 # picks how many work best for you.
-MOTORSPORT_KEYS = ("ms_car", "ms_panning", "ms_car_sharp", "ms_wheels", "ms_framing", "ms_action", "ms_background", "ms_light")
+MOTORSPORT_KEYS = ("ms_car", "ms_panning", "ms_car_sharp", "ms_wheels", "ms_framing", "ms_action", "ms_background", "ms_light",
+                   "ms_clear_view", "ms_car_size")
 STYLE_DIMENSIONS = 12
 STYLE_CHOICES = (0, 12, 32)
 L2_CHOICES = (0.3, 1.0, 3.0, 10.0)

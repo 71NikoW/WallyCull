@@ -24,7 +24,7 @@ from tqdm import tqdm
 from . import database, loader
 from .paths import MODELS_DIR, USER_DIR
 
-AI_VERSION = 2
+AI_VERSION = 3
 LAION_URL = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
 
 # Content types: (key, label, prompt, value: -1 low, 0 neutral, +1 high)
@@ -82,6 +82,9 @@ MOTORSPORT_QUESTIONS = {
                   "an uneventful car simply driving on a track"),
     "ms_background": ("a race car in front of a clean, calm background", "a race car in front of a cluttered, distracting background"),
     "ms_light": ("a race car in warm, dramatic golden-hour light", "a race car in flat, dull light"),
+    # The most common misses in practice: something right in front of the car, or the car far too small
+    "ms_clear_view": ("an unobstructed view of the race car", "a race car hidden behind a pole, fence, loudspeaker or crane"),
+    "ms_car_size": ("a race car filling a large part of the frame", "a tiny race car far away in a large empty frame"),
 }
 QUESTIONS.update(MOTORSPORT_QUESTIONS)
 
@@ -130,6 +133,10 @@ def ai_reasons(b: dict) -> list[str]:
     if r.get("content") == "motorsport" or r.get("ms_car", 0) >= 0.5:
         if r.get("ms_car", 1) < 0.25:
             reasons.append("No race car in the frame (AI)")
+        elif r.get("ms_clear_view", 0.5) < 0.25:
+            reasons.append("Something in front of the race car (AI)")
+        elif r.get("ms_car_size", 0.5) < 0.25:
+            reasons.append("Race car very small in the frame (AI)")
         elif r.get("ms_framing", 0.5) < 0.25:
             reasons.append("Race car cut off at the edge (AI)")
         if r.get("ms_panning", 0) >= 0.75 and r.get("ms_car_sharp", 0) >= 0.6:
@@ -146,7 +153,8 @@ def ai_reasons(b: dict) -> list[str]:
 
 
 AI_REASON_PREFIXES = ("Content:", "Aesthetics", "Wall-art potential", "Very close to", "Far from", "No race car",
-                      "Race car cut off", "Good pan", "Racing action")
+                      "Race car cut off", "Good pan", "Racing action",
+                      "Something in front", "Race car very small")
 
 
 def available() -> tuple[bool, str]:
