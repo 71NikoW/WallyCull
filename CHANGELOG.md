@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 - 2026-10-15
+
+- New: **Overnight training.** Start it in the evening; WallyCull analyzes every folder you used, sets up
+  the AI if needed, trains your model thoroughly and sorts everything again. The PC stays awake meanwhile,
+  and the result is shown in the app the next morning.
+- Star ratings you gave in the camera (Fuji in-camera rating) or in Lightroom and other programs (including
+  Lightroom's "rejected" flag) now count as training data. Your swipes in WallyCull always win.
+- Smarter learning: the training tries several model sizes and keeps the one that predicts your verdicts
+  best, and it spreads your verdicts to visually similar photos (label spreading on the CLIP features).
+  Your reference images take part as "keep" examples.
+
 ## 0.7.0 - 2026-10-15
 
 - Everything is in English now: app, rating screen, report, setup, settings and command line.

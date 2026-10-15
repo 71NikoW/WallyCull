@@ -23,7 +23,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import __version__, ai, database, rating, updater
+from . import __version__, ai, database, night, rating, updater
 from .classify import CATEGORIES, NAMES
 from .files import CONFIRM_WORD
 from .paths import PROGRAM_DIR, REFERENCES_DIR, USER_DIR
@@ -35,7 +35,7 @@ PROGRESS = re.compile(r"^\s*(?P<title>[^:|]{1,40}):\s*(?P<pct>\d+)%\|.*?\|\s*(?P
 TITLES = {
     "analyze": "Analysis", "classify": "Classify", "reject": "Move rejects",
     "restore": "Restore", "purge": "Recycle Bin", "setup-ai": "Set up AI",
-    "update": "Update", "rollback": "Previous version",
+    "update": "Update", "rollback": "Previous version", "night": "Overnight run",
 }
 APP_ID = "wallycull"
 
@@ -204,7 +204,7 @@ class App:
             "recent": [r for r in self.state["recent"] if Path(r).is_dir()], "stats": self.stats(),
             "task": self.task.as_dict() if self.task else None, "ai": self.ai,
             "update": {k: v for k, v in self.update.items() if not k.startswith("_")},
-            "names": NAMES, "rejected_folder": self.config["files"]["rejected_folder"], "confirm_word": CONFIRM_WORD,
+            "night": night.last_summary(), "names": NAMES, "rejected_folder": self.config["files"]["rejected_folder"], "confirm_word": CONFIRM_WORD,
         }
 
     def reject_preview(self) -> dict:
@@ -235,6 +235,12 @@ class App:
                 return self.task.as_dict()
             if kind == "setup-ai":
                 self.task = Task(kind, ["setup-ai"], True, self._after_task)
+                return self.task.as_dict()
+            if kind == "night":
+                if not night.recent_folders():
+                    raise RuntimeError("Choose a photo folder first")
+                self.session = None
+                self.task = Task(kind, ["night"], True, self._after_task)
                 return self.task.as_dict()
             if not self.folder:
                 raise RuntimeError("Choose a photo folder first")
@@ -633,6 +639,10 @@ pre{margin:6px 0 0;max-height:150px;overflow:auto;font:12px/1.45 Consolas,monosp
   </section>
 </div>
 <aside style="display:flex;flex-direction:column;gap:18px">
+  <section class="card"><h2>Overnight training</h2>
+    <p class="small muted" style="margin:0 0 10px">Start it before you go to bed. WallyCull analyzes every folder you used, reads the stars you gave in the camera or Lightroom, trains your model thoroughly and sorts everything again. The PC stays awake until it is done.</p>
+    <button class="primary" data-task="night" id="nightbtn">Start overnight run</button>
+    <div id="nightstatus" class="small" style="margin-top:10px"></div></section>
   <section class="card"><h2>AI rating</h2><div id="aistatus" class="small"></div></section>
   <section class="card"><h2>Updates</h2><div id="updatestatus" class="small"></div>
     <div class="row" style="margin-top:10px"><button id="updatebtn">Check now</button><button id="rollbackbtn" title="Go back to the version before the last update">Previous version</button></div></section>
@@ -680,6 +690,8 @@ function draw(j){
   html($("#aistatus"),j.ai?"Set up. Aesthetics, wall-art potential and content are rated during the analysis."
     +"<p class='muted' style='margin:8px 0'>References: put favorite images (e.g. your best sellers) into the references folder. Photos in that style gain value.</p><button id='references'>Open references folder</button>"
     :`<p style="margin:0 0 10px">Not set up yet (normally the setup does this). Without AI only the technical quality is rated.</p><button class="primary" data-task="setup-ai" ${running?"disabled":""}>Set up AI (about 5 GB)</button>`);
+  $("#nightbtn").disabled=running||!j.recent.length;
+  html($("#nightstatus"),nightText(j.night));
   const u=j.update, ub=$("#updatebadge");
   let ut={new:`New version ${esc(u.new)} is being installed …`,current:`Up to date (checked ${u.checked||""})`,checking:"Checking …",unknown:"Checking …",
     development:"Developer version: updates only exist in the installed app.",error:"Could not check: "+esc(u.error||"")}[u.status]||esc(u.status);
@@ -716,6 +728,23 @@ $("#recent").onclick=e=>{const b=e.target.closest("button");if(b)post("/app/fold
 document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b||b.disabled)return;
   if(b.dataset.task){dismissed=null;post("/app/task",{kind:b.dataset.task,recompute:$("#recompute").checked});}
   else if(b.dataset.link) location.href=b.dataset.link;});
+function nightText(n){
+  if(!n) return "";
+  const when=(n.finished||n.started||"").replace("T"," ").slice(0,16);
+  let h=`<b>${n.finished?"Last run":"Running since"} ${esc(when)}</b>`;
+  for(const f of n.folders){
+    const short=esc(f.folder.split(/[\\/]/).pop()||f.folder);
+    if(f.error){h+=`<p style="margin:6px 0 0">${short}: <span style="color:var(--danger)">${esc(f.error)}</span></p>`;continue;}
+    const m=f.model||{}, st=f.stars||{}, c=f.counts||{};
+    const stars=(st.keep||0)+(st.favorite||0)+(st.reject||0);
+    let line=`${short}: ${f.analyzed} newly analyzed`+(stars?`, ${stars} star ratings found`:"");
+    if(m.active){line+=`. Model learned from ${m.rated} verdicts, accuracy ${Math.round(m.accuracy*100)}%`
+      +(m.accuracy_before!=null?` (before ${Math.round(m.accuracy_before*100)}%)`:"")+".";}
+    else line+=". "+esc(f.hint||"");
+    h+=`<p style="margin:6px 0 0">${line}</p><p class="muted" style="margin:2px 0 0">Highlight ${c.highlight||0} · Keep ${c.keep||0} · Review ${c.review||0} · Reject ${c.reject||0}</p>`;
+  }
+  return h;
+}
 function closeFolds(){$("#preview").classList.remove("open");$("#restore").classList.remove("open");}
 const name=p=>esc(p.split("/").pop());
 const thumb=b=>`<img loading="lazy" src="${b.preview?"/previews/"+esc(b.preview):""}" alt="">`;

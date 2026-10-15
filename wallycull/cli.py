@@ -75,6 +75,9 @@ def main(argv: list[str] | None = None) -> None:
     rp = sub.add_parser("report", help="create and open the report again")
     rp.add_argument("folder")
 
+    ni = sub.add_parser("night", help="overnight run: analyze, read stars, train thoroughly, classify (all recent folders)")
+    ni.add_argument("folders", nargs="*", help="photo folders (default: the folders you used in the app)")
+
     s = sub.add_parser("setup-ai", help="install PyTorch (GPU), CLIP and the AI models")
     s.add_argument("--force", action="store_true", help="reinstall even if everything is there")
     sub.add_parser("download-models", help=argparse.SUPPRESS)
@@ -91,6 +94,11 @@ def main(argv: list[str] | None = None) -> None:
         from . import ai_setup
 
         sys.exit(ai_setup.install(force=args.force))
+    if args.command == "night":
+        from . import night
+
+        night.run(cfg, [_folder(f) for f in args.folders])
+        return
     if args.command == "download-models":
         from . import ai_setup
 

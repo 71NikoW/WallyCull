@@ -61,6 +61,25 @@ it as much as possible. The header shows how often the model agrees with you.
 
 Click **← Overview** or **Done & classify** to save and classify all photos with the new model.
 
+### Overnight training
+
+**Start overnight run** (right column) is meant for the evening. For every photo folder you used in the app it
+
+1. analyzes new photos and computes the AI scores (and sets up the AI first if it is missing),
+2. reads the star ratings you gave in the camera or in Lightroom, Capture One, Bridge, ...:
+   3-4 stars count as keep, 5 stars as favorite, Lightroom's "rejected" flag as reject (1-2 stars are ignored),
+3. trains your model thoroughly: it tries several model sizes, keeps the one that predicts your verdicts best,
+   and spreads your verdicts to visually similar photos, so one verdict on a burst or a motif helps with all
+   similar shots; your reference images count as "keep" examples,
+4. sorts everything again and writes the report.
+
+The PC does not go to sleep while it runs (the screen may still turn off). The next morning the card shows
+what happened per folder and how often the model now agrees with you.
+
+What it cannot do: learn your taste from nothing. It needs at least 40 verdicts per folder (swipes, stars or
+restored photos, at least 10 keep and 10 reject). Ten minutes of swiping in the morning, or stars you already
+gave in the camera, make every following night much more useful.
+
 ### 3. Report
 
 A grid of all photos, filtered by category and sortable by quality, name, date or burst. Click a photo

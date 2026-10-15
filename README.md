@@ -26,11 +26,13 @@ No admin rights needed. The program goes to `%LOCALAPPDATA%\Programs\WallyCull`.
 
 1. **Choose folder**, for example `E:\DCIM\100_FUJI`.
 2. **Analyze.** Runs in the background with low priority. Changes no files.
-3. **Rate** some photos: ← reject, → keep, ↑ favorite. After 40 ratings your personal model learns your taste.
-4. **Open report** to see every photo with its category and the reason.
-5. **Move rejects → Preview → Move to `_rejected` now.**
-6. Changed your mind? **Restore** puts photos back (single photos, one run, or everything).
-7. Only when you are sure: **Delete for good** sends `_rejected` to the Recycle Bin after you type `DELETE`.
+3. **Rate** some photos: ← reject, → keep, ↑ favorite. After 40 verdicts your personal model learns your taste.
+   Stars you gave in the camera or in Lightroom count as verdicts too.
+4. **Start overnight run** before you go to bed: WallyCull trains thoroughly and sorts all folders again.
+5. **Open report** to see every photo with its category and the reason.
+6. **Move rejects → Preview → Move to `_rejected` now.**
+7. Changed your mind? **Restore** puts photos back (single photos, one run, or everything).
+8. Only when you are sure: **Delete for good** sends `_rejected` to the Recycle Bin after you type `DELETE`.
 
 The [user guide](docs/user-guide.md) explains every step, the categories and all keyboard shortcuts.
 

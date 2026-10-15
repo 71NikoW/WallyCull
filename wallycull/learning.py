@@ -47,8 +47,12 @@ FEATURES = [
     ("ai_musiq", "image quality (MUSIQ)"),
     ("ai_nima", "aesthetics (NIMA)"),
 ]
-# Plus up to STYLE_DIMENSIONS principal components of the CLIP image features ("subject and style").
+# Plus a number of principal components of the CLIP image features ("subject and style"); the training
+# picks how many work best for you.
 STYLE_DIMENSIONS = 12
+STYLE_CHOICES = (0, 12, 32)
+L2_CHOICES = (0.3, 1.0, 3.0, 10.0)
+BLEND_CHOICES = (1.0, 0.75, 0.5, 0.25, 0.0)
 
 
 def embedding(b: dict) -> np.ndarray | None:
@@ -99,15 +103,15 @@ def features(b: dict, pca: dict | None = None) -> np.ndarray:
     return np.array(base, dtype=np.float64)
 
 
-def _pca(images: list[dict]) -> dict | None:
+def _pca(images: list[dict], dims: int = STYLE_DIMENSIONS) -> dict | None:
     """Principal components of the CLIP features of all images: condenses subject and style into a few numbers."""
     embs = [e for e in (embedding(b) for b in images) if e is not None]
-    if len(embs) < STYLE_DIMENSIONS * 3:
+    if not dims or len(embs) < dims * 3:
         return None
     x = np.array(embs)
     mean = x.mean(axis=0)
     _, _, vt = np.linalg.svd(x - mean, full_matrices=False)
-    return {"mean": mean.tolist(), "axes": vt[:STYLE_DIMENSIONS].tolist()}
+    return {"mean": mean.tolist(), "axes": vt[:dims].tolist()}
 
 
 def _logistic(x: np.ndarray, y: np.ndarray, weight: np.ndarray, l2: float) -> np.ndarray:
@@ -186,16 +190,83 @@ def _with_annotations(db, rows) -> list[dict]:
     return images
 
 
-def train(photo_dir: Path, config: dict) -> dict:
-    """Trains the model from all ratings and stores the prediction for every image in the database."""
+def similarity_graph(emb: np.ndarray, anchors: np.ndarray | None = None, k: int = 12):
+    """k nearest neighbors of every photo by CLIP similarity (reference images appended at the end)."""
+    x = emb.astype(np.float32)
+    if anchors is not None and len(anchors):
+        x = np.vstack([x, anchors.astype(np.float32)])
+    x /= np.linalg.norm(x, axis=1, keepdims=True) + 1e-8
+    total = len(x)
+    k = min(k, total - 1)
+    neighbors = np.zeros((total, k), dtype=np.int64)
+    weights = np.zeros((total, k), dtype=np.float32)
+    for start in range(0, total, 1024):
+        sim = x[start : start + 1024] @ x.T
+        rows = np.arange(sim.shape[0])
+        sim[rows, rows + start] = -1  # not its own neighbor
+        idx = np.argpartition(-sim, k, axis=1)[:, :k]
+        neighbors[start : start + 1024] = idx
+        weights[start : start + 1024] = np.exp((np.take_along_axis(sim, idx, axis=1) - 1) / 0.05)
+    weights /= weights.sum(axis=1, keepdims=True) + 1e-12
+    return neighbors, weights, len(emb)
+
+
+def spread(graph, labels: dict[int, float], alpha: float = 0.85, iterations: int = 40) -> np.ndarray:
+    """Label spreading: your verdicts flow along the similarity graph to similar photos.
+
+    labels: photo index -> 1.0 keep / 0.0 reject. Reference images count as "keep".
+    Returns a keep probability for every photo."""
+    neighbors, weights, n = graph
+    seed = np.zeros((len(neighbors), 2), dtype=np.float32)  # columns: reject, keep
+    for i, v in labels.items():
+        seed[i] = (1 - v, v)
+    seed[n:, 1] = 1.0
+    f = seed.copy()
+    for _ in range(iterations):
+        f = alpha * (weights[:, :, None] * f[neighbors]).sum(axis=1) + (1 - alpha) * seed
+    prior = float(np.mean(list(labels.values()))) if labels else 0.5
+    mass = f.sum(axis=1)
+    return ((f[:n, 1] + 0.02 * prior) / (mass[:n] + 0.02)).astype(np.float64)
+
+
+def _log_loss(p: np.ndarray, y: np.ndarray) -> float:
+    p = np.clip(p, 1e-4, 1 - 1e-4)
+    return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
+
+
+def _reference_embeddings(config: dict) -> np.ndarray | None:
+    """Features of your reference images (computed during the AI analysis), or None."""
+    try:
+        from .ai import references_folder
+
+        data = np.load(references_folder(config) / ".references_cache.npz", allow_pickle=False)
+        return data["emb"].astype(np.float32)
+    except Exception:
+        return None
+
+
+def _folds(n: int) -> list[np.ndarray]:
+    order = np.random.default_rng(0).permutation(n)
+    return [order[f::5] for f in range(5)]
+
+
+def train(photo_dir: Path, config: dict, thorough: bool = False) -> dict:
+    """Trains the model from all ratings and stores the prediction for every image in the database.
+
+    thorough=True (overnight run) tries several model sizes and picks the one that predicts your verdicts
+    best in cross-validation. Otherwise the settings of the last thorough training are reused (fast)."""
     c = config["learning"]
     db = database.open_db(photo_dir)
     examples = _with_annotations(db, db.execute(
-        "SELECT i.*, r.verdict FROM images i JOIN ratings r ON r.image_id = i.id "
+        "SELECT i.*, r.verdict, r.origin FROM images i JOIN ratings r ON r.image_id = i.id "
         "WHERE i.metrics IS NOT NULL AND i.error IS NULL AND i.version > 0"
     ).fetchall())
     y = np.array([1.0 if b["verdict"] >= 1 else 0.0 for b in examples])
-    status = {"rated": len(examples), "keep": int(y.sum()), "reject": int(len(y) - y.sum()), "active": False}
+    origins = {}
+    for b in examples:
+        origins[b["origin"]] = origins.get(b["origin"], 0) + 1
+    status = {"rated": len(examples), "keep": int(y.sum()), "reject": int(len(y) - y.sum()), "active": False,
+              "sources": origins}
     if len(examples) < c["min_ratings"] or min(status["keep"], status["reject"]) < c["min_per_side"]:
         db.close()
         status["hint"] = (
@@ -207,31 +278,83 @@ def train(photo_dir: Path, config: dict) -> dict:
     images = _with_annotations(db, db.execute(
         "SELECT * FROM images WHERE metrics IS NOT NULL AND error IS NULL AND version > 0"
     ).fetchall())
-    pca = _pca(images)
-    x = np.array([features(b, pca) for b in examples])
-    # Honest accuracy: 5-fold cross-validation
-    order = np.random.default_rng(0).permutation(len(y))
-    hits = 0
-    for fold in range(5):
-        test = order[fold::5]
-        learn = np.setdiff1d(order, test)
-        if len(set(y[learn])) < 2:
+    index = {b["id"]: i for i, b in enumerate(images)}
+    example_idx = np.array([index[b["id"]] for b in examples])
+    folds = _folds(len(y))
+
+    # Similar photos: label spreading over the CLIP features (needs AI data)
+    has_emb = np.array([embedding(b) is not None for b in images])
+    spread_oof = None
+    if has_emb.sum() >= 30 and has_emb[example_idx].mean() > 0.8:
+        emb_rows = np.nonzero(has_emb)[0]
+        emb_pos = {int(r): i for i, r in enumerate(emb_rows)}
+        emb = np.array([embedding(images[r]) for r in emb_rows])
+        graph = similarity_graph(emb, _reference_embeddings(config))
+        labeled = {emb_pos[int(r)]: float(v) for r, v in zip(example_idx, y) if int(r) in emb_pos}
+        spread_oof = np.full(len(y), np.nan)
+        for test in folds:
+            hidden = {emb_pos[int(example_idx[t])] for t in test if int(example_idx[t]) in emb_pos}
+            scores = spread(graph, {i: v for i, v in labeled.items() if i not in hidden})
+            for t in test:
+                if int(example_idx[t]) in emb_pos:
+                    spread_oof[t] = scores[emb_pos[int(example_idx[t])]]
+        spread_all = np.full(len(images), np.nan)
+        spread_all[emb_rows] = spread(graph, labeled)
+
+    def cross_validate(dims: int, l2: float) -> tuple[np.ndarray, dict | None]:
+        pca = _pca(images, dims)
+        x = np.array([features(b, pca) for b in examples])
+        oof = np.full(len(y), float(y.mean()))
+        for test in folds:
+            learn = np.setdiff1d(np.arange(len(y)), test)
+            if len(set(y[learn])) < 2:
+                continue
+            oof[test] = predict(_fit(x[learn], y[learn], l2), x[test])
+        return oof, pca
+
+    last = load_model(photo_dir) or {}
+    if thorough:
+        candidates = [(d, l2) for d in STYLE_CHOICES for l2 in L2_CHOICES]
+    else:
+        candidates = [(last.get("style_dims", STYLE_DIMENSIONS), last.get("l2", c["regularization"]))]
+    best = None
+    for dims, l2 in candidates:
+        oof, pca = cross_validate(dims, l2)
+        if dims and pca is None:
             continue
-        m = _fit(x[learn], y[learn], c["regularization"])
-        hits += int(((predict(m, x[test]) >= 0.5) == (y[test] == 1)).sum())
-    model = _fit(x, y, c["regularization"])
+        blends = BLEND_CHOICES if (spread_oof is not None and thorough) else (
+            [last.get("blend", 0.5) if spread_oof is not None else 1.0])
+        for w in blends:
+            p = oof.copy()
+            if w < 1 and spread_oof is not None:
+                ok = ~np.isnan(spread_oof)
+                p[ok] = w * oof[ok] + (1 - w) * spread_oof[ok]
+            loss = _log_loss(p, y)
+            if best is None or loss < best["loss"]:
+                best = {"loss": loss, "dims": dims, "l2": l2, "blend": w, "pca": pca,
+                        "accuracy": float(((p >= 0.5) == (y == 1)).mean())}
+    if best is None:  # too few images for any style dimensions
+        oof, pca = cross_validate(0, c["regularization"])
+        best = {"loss": _log_loss(oof, y), "dims": 0, "l2": c["regularization"], "blend": 1.0, "pca": None,
+                "accuracy": float(((oof >= 0.5) == (y == 1)).mean())}
+
+    pca = best["pca"]
+    model = _fit(np.array([features(b, pca) for b in examples]), y, best["l2"])
     model.update(
-        features=[n for n, _ in FEATURES], pca=pca, accuracy=round(hits / len(y), 3),
-        rated=len(y), trained=datetime.now().isoformat(timespec="seconds"),
+        features=[n for n, _ in FEATURES], pca=pca, accuracy=round(best["accuracy"], 3), rated=len(y),
+        trained=datetime.now().isoformat(timespec="seconds"), style_dims=best["dims"], l2=best["l2"],
+        blend=best["blend"], thorough=thorough or last.get("thorough", False), sources=origins,
     )
     model_path(photo_dir).write_text(json.dumps(model), encoding="utf-8")
 
-    if images:
-        p = predict(model, np.array([features(b, pca) for b in images]))
-        db.executemany("UPDATE images SET personal=? WHERE id=?", [(float(v), b["id"]) for v, b in zip(p, images)])
+    p = predict(model, np.array([features(b, pca) for b in images]))
+    if spread_oof is not None and best["blend"] < 1:
+        ok = ~np.isnan(spread_all)
+        p[ok] = best["blend"] * p[ok] + (1 - best["blend"]) * spread_all[ok]
+    db.executemany("UPDATE images SET personal=? WHERE id=?", [(float(v), b["id"]) for v, b in zip(p, images)])
     db.commit()
     db.close()
-    status.update(active=True, accuracy=model["accuracy"])
+    status.update(active=True, accuracy=model["accuracy"], style_dims=best["dims"], blend=best["blend"])
     return status
 
 

@@ -43,7 +43,10 @@ wallycull/
   duplicates.py   duplicates and bursts (perceptual hashes + capture time)
   ai.py           CLIP, LAION aesthetics, pyiqa (MUSIQ/NIMA), references -> value score
   ai_setup.py     installs PyTorch/CLIP into the user folder (called by the setup)
-  learning.py     personal model (logistic regression on measurements + CLIP features)
+  learning.py     personal model: logistic regression on measurements + CLIP features, blended with label
+                  spreading on the CLIP similarity graph; the overnight run picks sizes by cross-validation
+  signals.py      star ratings from EXIF, embedded XMP (also inside Fuji RAF) and .xmp sidecars
+  night.py        overnight run: analyze, AI, stars, thorough training, classify, keep the PC awake
   classify.py     the category matrix and the human-readable reasons
   files.py        move to _rejected, restore, purge to the Recycle Bin
   report.py       HTML report and annotations CSV
