@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.2 - 2026-10-15
+
+- Fixed: once the AI was set up, the categories ignored your trained model and only used the generic AI
+  value and technical quality. Now your model decides whenever it is trained; on held-out bursts of your
+  race photos it was right 86–93 % of the time, the generic value/quality far less.
+
 ## 0.10.1 - 2026-10-15
 
 - Two more motorsport checks, from a review of your own photos: something right in front of the car

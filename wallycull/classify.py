@@ -162,7 +162,8 @@ def decide(images: list[dict], config: dict, model: dict | None = None) -> list[
         if b["category"]:
             continue  # already decided as duplicate/burst
         value = b.get("value")
-        if value is None and p is not None and model:
+        if p is not None and model:
+            # Your trained model knows your taste (and already uses the AI scores): it decides
             if (b.get("metrics") or {}).get("failed"):
                 b["category"] = "reject"
             elif p < lc["reject_below"]:
