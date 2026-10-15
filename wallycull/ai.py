@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -127,6 +128,42 @@ def available() -> tuple[bool, str]:
     return True, ""
 
 
+# Measured on an RTX 4060 Ti: stacking images of the same size makes NIMA almost 3x faster with the same
+# values, but makes MUSIQ slower. Metrics listed here are therefore run image by image.
+IQA_ONE_BY_ONE = {"musiq"}
+
+
+class Preload:
+    """Loads the models in the background (about 12 s), e.g. while the classic analysis runs.
+    Calling the object waits for them and returns the models."""
+
+    def __init__(self, config: dict):
+        self._config = config
+        self._models: Models | None = None
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._load, name="ai-preload", daemon=True)
+        self._thread.start()
+
+    def _load(self) -> None:
+        try:
+            self._models = Models(self._config)
+        except BaseException as e:  # reported when the models are actually needed
+            self._error = e
+
+    def __call__(self) -> Models:
+        self._thread.join()
+        if self._error is not None:
+            raise self._error
+        return self._models
+
+
+def preload(config: dict) -> Preload | None:
+    """Starts loading the models in the background when the AI is on and installed."""
+    if not config["ai"].get("enabled", True) or not available()[0]:
+        return None
+    return Preload(config)
+
+
 class Models:
     """Loads the models once and keeps them in (GPU) memory."""
 
@@ -199,10 +236,20 @@ class Models:
             answers = (100 * emb @ self.text_questions.T).cpu().numpy()
             emb_np = emb.cpu().numpy()
             iqa_scores = {}
+            if self.iqa:
+                tensors = [torch.from_numpy(np.asarray(b, dtype=np.float32) / 255).permute(2, 0, 1) for b in images]
+                same_size: dict[tuple, list[int]] = {}
+                for i, b in enumerate(images):
+                    same_size.setdefault(b.size, []).append(i)
             for name, metric in self.iqa.items():
                 try:
-                    tensors = [torch.from_numpy(np.asarray(b, dtype=np.float32) / 255).permute(2, 0, 1) for b in images]
-                    iqa_scores[name] = [float(metric(t.unsqueeze(0).to(self.device)).item()) for t in tensors]
+                    groups = [[i] for i in range(len(images))] if name in IQA_ONE_BY_ONE else list(same_size.values())
+                    scores = [0.0] * len(images)
+                    for group in groups:
+                        out = metric(torch.stack([tensors[i] for i in group]).to(self.device))
+                        for i, value in zip(group, out.flatten().tolist()):
+                            scores[i] = float(value)
+                    iqa_scores[name] = scores
                 except Exception as e:
                     print(f"  {name} failed: {e}")
         aesthetic = self._aesthetic(emb_np) if self.laion else [None] * len(images)
@@ -280,8 +327,9 @@ def references_folder(config: dict) -> Path:
     return folder if folder.is_absolute() else USER_DIR / folder
 
 
-def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
-    """Computes the AI scores for all images that do not have them yet (cached in the database)."""
+def run(photo_dir: Path, config: dict, recompute: bool = False, models: Preload | None = None) -> dict:
+    """Computes the AI scores for all images that do not have them yet (cached in the database).
+    models: models already loading in the background (see preload), otherwise they are loaded here."""
     a = config["ai"]
     if not a.get("enabled", True):
         return {"ai": "off"}
@@ -306,17 +354,24 @@ def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
 
     def get_models() -> Models:
         if not loaded:
-            loaded.append(Models(config))
+            loaded.append(models() if models is not None else Models(config))
         return loaded[0]
 
     raw = set(config["files"]["raw"])
     size = int(a.get("batch_size", 16))
     if todo:
         print(f"AI analysis of {len(todo)} images ...")
+        parts = [todo[start : start + size] for start in range(0, len(todo), size)]
         with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 4)) as pool, tqdm(total=len(todo), desc="AI", unit="img") as bar:
-            for start in range(0, len(todo), size):
-                part = todo[start : start + size]
-                images = list(pool.map(lambda r: _image_for_ai(photo_dir, r["source"], raw, 1024), part))
+
+            def load(part):
+                return [pool.submit(_image_for_ai, photo_dir, r["source"], raw, 1024) for r in part]
+
+            pending = load(parts[0])
+            for n, part in enumerate(parts):
+                images = [f.result() for f in pending]
+                if n + 1 < len(parts):
+                    pending = load(parts[n + 1])  # the next images load while the graphics card works
                 valid = [(r, b) for r, b in zip(part, images) if b is not None]
                 if valid:
                     for (r, _), (scores, emb) in zip(valid, get_models().batch([b for _, b in valid])):

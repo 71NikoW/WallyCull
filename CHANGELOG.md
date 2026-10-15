@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0 - 2026-10-15
+
+- **Faster analysis.** Large camera JPGs and RAW previews are decoded about 3x faster: the full-resolution
+  brightness used for the sharpness check is read straight from the JPEG, colors only at reduced size.
+  The measurements stay the same, so photos analyzed before are not measured again.
+- The AI models load in the background while the classic analysis runs (saves about 12 s per run), and the
+  overnight run loads them only once for all folders.
+- The AI prepares the next photos while the graphics card works, and NIMA scores several photos at once
+  (almost 3x faster, same values).
+- Duplicate fingerprints are computed from the preview (much faster, same result on real photos).
+
 ## 0.8.0 - 2026-10-15
 
 - New: **Overnight training.** Start it in the evening; WallyCull analyzes every folder you used, sets up

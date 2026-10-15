@@ -101,6 +101,10 @@ def _shrink(img: Image.Image, edge: int) -> Image.Image:
     return img
 
 
+# libjpeg scales while decoding: much faster than decoding everything and shrinking afterwards
+_REDUCED = ((8, cv2.IMREAD_REDUCED_COLOR_8), (4, cv2.IMREAD_REDUCED_COLOR_4), (2, cv2.IMREAD_REDUCED_COLOR_2))
+
+
 def _load_pil(data, edge: int, full: bool = False):
     """Returns (downscaled image, EXIF info, original size, full-resolution grayscale or None)."""
     try:
@@ -110,13 +114,22 @@ def _load_pil(data, edge: int, full: bool = False):
     original = img.size
     info = _read_exif(img.getexif())
     if full and img.format == "JPEG" and hasattr(data, "getvalue"):
-        # Fast path: OpenCV decodes (incl. EXIF rotation) and downscales about twice as fast as Pillow
-        bgr = cv2.imdecode(np.frombuffer(data.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+        # Fast path (OpenCV, incl. EXIF rotation): the full-resolution grayscale comes straight from the
+        # JPEG's brightness channel, the color image is decoded at reduced size. About 3x faster than
+        # decoding all 40 megapixels in color, with the same grayscale.
+        buffer = np.frombuffer(data.getvalue(), np.uint8)
+        gray = cv2.imdecode(buffer, cv2.IMREAD_GRAYSCALE)
+        flag = next((flag for factor, flag in _REDUCED if max(original) / factor >= edge), cv2.IMREAD_COLOR)
+        bgr = cv2.imdecode(buffer, flag) if gray is not None else None
         if bgr is not None:
-            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-            f = edge / max(bgr.shape[:2])
+            f = edge / max(gray.shape)
             if f < 1:
-                bgr = cv2.resize(bgr, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+                # Brightness from the full resolution (exactly as before: sharpness depends on it),
+                # only the colors come from the reduced decode
+                luma = cv2.resize(gray, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+                ycc = cv2.cvtColor(cv2.resize(bgr, luma.shape[::-1], interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2YCrCb)
+                ycc[..., 0] = luma
+                bgr = cv2.cvtColor(ycc, cv2.COLOR_YCrCb2BGR)
             return Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)), info, original, gray
     if not full:
         img.draft("RGB", (edge, edge))  # JPEG: decode directly at reduced size, saves a lot of time

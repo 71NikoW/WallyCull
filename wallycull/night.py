@@ -66,7 +66,7 @@ def _hint(result: dict, config: dict) -> str:
             "Rate photos in the app, or give stars in the camera or in Lightroom.")
 
 
-def run_folder(folder: Path, config: dict) -> dict:
+def run_folder(folder: Path, config: dict, models: ai.Preload | None = None) -> dict:
     started = time.time()
     print(f"STEP {folder}", flush=True)
     result: dict = {"folder": str(folder)}
@@ -74,7 +74,7 @@ def run_folder(folder: Path, config: dict) -> dict:
     result["analyzed"] = a["analyzed"]
     result["errors"] = a["errors"]
     try:
-        r = ai.run(folder, config)
+        r = ai.run(folder, config, models=models)
         result["ai_new"] = r.get("new", 0)
         result["ai"] = r.get("ai")
     except Exception as e:  # AI problems must not stop the rest of the night
@@ -106,9 +106,10 @@ def run(config: dict, folders: list[Path] | None = None) -> dict:
     keep_awake(True)
     try:
         _ensure_ai(config)
+        models = ai.preload(config)  # loaded once for all folders, in the background
         for folder in folders:
             try:
-                summary["folders"].append(run_folder(folder, config))
+                summary["folders"].append(run_folder(folder, config, models))
             except KeyboardInterrupt:
                 raise
             except Exception as e:

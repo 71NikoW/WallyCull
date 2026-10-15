@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
 import os
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -81,7 +82,8 @@ def analyze_image(task: dict) -> dict:
         preview.save(photo_dir / database.DATA_DIR_NAME / "previews" / name, quality=82)
         result.update(
             width=info["width"], height=info["height"], taken_at=info.get("taken_at"), camera=info.get("camera"),
-            phash=str(imagehash.phash(pil)), dhash=str(imagehash.dhash(pil)),
+            # Both hashes shrink to a few pixels anyway: computing them from the preview is much faster
+            phash=str(imagehash.phash(preview)), dhash=str(imagehash.dhash(preview)),
             metrics=metrics, quality=metrics["quality"], preview=name,
         )
     except Exception as error:  # broken file: note it and carry on
@@ -127,7 +129,9 @@ def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
     print(f"{len(found)} images found, {len(found) - len(tasks)} from the cache, {len(tasks)} to analyze.")
     errors = 0
     if tasks:
-        with ProcessPoolExecutor(max_workers=worker_count(config), initializer=_worker_init, initargs=(config,)) as pool:
+        # "spawn" as on Windows: safe while the AI models load in a background thread
+        with ProcessPoolExecutor(max_workers=worker_count(config), mp_context=multiprocessing.get_context("spawn"),
+                                 initializer=_worker_init, initargs=(config,)) as pool:
             futures = [pool.submit(analyze_image, t) for t in tasks]
             try:
                 for i, f in enumerate(tqdm(as_completed(futures), total=len(futures), desc="Analyzing", unit="img"), 1):

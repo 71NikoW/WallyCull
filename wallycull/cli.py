@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> None:
     folder = _folder(args.folder)
 
     if args.command == "analyze":
+        # The AI models load in the background while the classic analysis runs
+        models = None if args.no_ai else ai.preload(cfg)
         try:
             stats = analyze.run(folder, cfg, recompute=args.recompute)
         except KeyboardInterrupt:
@@ -114,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
             print(f"{stats['errors']} files could not be read (listed in the report under 'Review').")
         if not args.no_ai:
             try:
-                ai.run(folder, cfg, recompute=args.recompute)
+                ai.run(folder, cfg, recompute=args.recompute, models=models)
             except KeyboardInterrupt:
                 sys.exit(1)
             except Exception as e:  # AI problems must not block the classic analysis
