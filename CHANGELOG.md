@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 - 2026-10-15
+
+- **Understands race track photos.** The AI now asks motorsport questions about every photo, based on
+  advice from motorsport photographers. Is a race car in the frame at all? Is it a good pan, with a sharp
+  car and a streaked background? Are the wheels spinning? Is there room in the direction of travel? Is
+  there action, such as sparks, smoke or a kerb strike? Is the background clean, and is the light good?
+  Together with the shutter speed these become training features, so your model learns which of them
+  matter to you. The report names them as reasons, e.g. "No race car in the frame".
+- New content type "Motorsport" (counts as valuable).
+- The AI scores are computed once more for all photos (fast, in the background).
+
 ## 0.9.2 - 2026-10-15
 
 - Your ratings, notes and decisions are backed up on the PC (`%LOCALAPPDATA%\WallyCull\backups`) after

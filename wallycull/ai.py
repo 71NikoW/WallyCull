@@ -24,7 +24,7 @@ from tqdm import tqdm
 from . import database, loader
 from .paths import MODELS_DIR, USER_DIR
 
-AI_VERSION = 1
+AI_VERSION = 2
 LAION_URL = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
 
 # Content types: (key, label, prompt, value: -1 low, 0 neutral, +1 high)
@@ -51,6 +51,7 @@ CONTENT = [
     ("landmark", "Landmark", "a photo of a famous landmark", 1),
     ("plants", "Plants/macro", "a close-up photo of flowers or plants", 1),
     ("abstract", "Abstract/art", "an abstract artistic photo", 1),
+    ("motorsport", "Motorsport", "a photo of a race car on a race track", 1),
     ("vehicle", "Vehicle", "a photo of a car, motorbike or vehicle", 0),
     ("food", "Food", "a photo of food", 0),
     ("interior", "Interior", "a photo of a room interior", 0),
@@ -65,6 +66,24 @@ QUESTIONS = {
     "wallart": ("a stunning photograph that would look great as a large print on a wall",
                 "an ordinary, forgettable snapshot"),
 }
+
+# Motorsport: what makes a race track photo good, after advice from motorsport photographers
+# (sharp car with streaked background when panning, spinning wheels, room in the direction of travel,
+# clean background, action moments, good light) and the typical misses of a burst (car not in the frame).
+MOTORSPORT_QUESTIONS = {
+    "ms_car": ("a race car on a race track", "an empty race track or a photo without a car"),
+    "ms_panning": ("a panning shot of a race car: a sharp car and a motion-blurred, streaked background",
+                   "a race car photo with a frozen, completely sharp background"),
+    "ms_car_sharp": ("a race car in crisp sharp focus with readable sponsor decals", "a blurry, out-of-focus race car"),
+    "ms_wheels": ("a racing car with spinning, motion-blurred wheels", "a racing car with frozen wheels that looks parked"),
+    "ms_framing": ("a race car well framed with space in front of it in the direction of travel",
+                   "a race car cut off at the edge of the frame"),
+    "ms_action": ("dramatic racing action with sparks, smoke, a kerb strike, a wheel lift or an overtake",
+                  "an uneventful car simply driving on a track"),
+    "ms_background": ("a race car in front of a clean, calm background", "a race car in front of a cluttered, distracting background"),
+    "ms_light": ("a race car in warm, dramatic golden-hour light", "a race car in flat, dull light"),
+}
+QUESTIONS.update(MOTORSPORT_QUESTIONS)
 
 
 def _norm(x: float, low: float, high: float) -> float:
@@ -108,6 +127,15 @@ def ai_reasons(b: dict) -> list[str]:
         reasons.append(f"Aesthetics {r['aesthetic']:.1f}/10 (AI)")
     if "wallart" in r:
         reasons.append(f"Wall-art potential {r['wallart'] * 100:.0f}%")
+    if r.get("content") == "motorsport" or r.get("ms_car", 0) >= 0.5:
+        if r.get("ms_car", 1) < 0.25:
+            reasons.append("No race car in the frame (AI)")
+        elif r.get("ms_framing", 0.5) < 0.25:
+            reasons.append("Race car cut off at the edge (AI)")
+        if r.get("ms_panning", 0) >= 0.75 and r.get("ms_car_sharp", 0) >= 0.6:
+            reasons.append("Good pan: sharp car, streaked background (AI)")
+        if r.get("ms_action", 0) >= 0.75:
+            reasons.append("Racing action (AI)")
     parts = b.get("value_parts") or {}
     if "reference" in parts:
         if parts["reference"] >= 0.8:
@@ -117,7 +145,8 @@ def ai_reasons(b: dict) -> list[str]:
     return reasons
 
 
-AI_REASON_PREFIXES = ("Content:", "Aesthetics", "Wall-art potential", "Very close to", "Far from")
+AI_REASON_PREFIXES = ("Content:", "Aesthetics", "Wall-art potential", "Very close to", "Far from", "No race car",
+                      "Race car cut off", "Good pan", "Racing action")
 
 
 def available() -> tuple[bool, str]:

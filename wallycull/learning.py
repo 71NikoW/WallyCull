@@ -46,9 +46,19 @@ FEATURES = [
     ("ai_reference", "closeness to your references"),
     ("ai_musiq", "image quality (MUSIQ)"),
     ("ai_nima", "aesthetics (NIMA)"),
+    ("shutter_log", "shutter speed"),
+    ("ms_car", "race car in the frame (AI)"),
+    ("ms_panning", "panning with streaked background (AI)"),
+    ("ms_car_sharp", "sharp race car (AI)"),
+    ("ms_wheels", "spinning wheels (AI)"),
+    ("ms_framing", "room in the direction of travel (AI)"),
+    ("ms_action", "racing action (AI)"),
+    ("ms_background", "clean background (AI)"),
+    ("ms_light", "dramatic light (AI)"),
 ]
 # Plus a number of principal components of the CLIP image features ("subject and style"); the training
 # picks how many work best for you.
+MOTORSPORT_KEYS = ("ms_car", "ms_panning", "ms_car_sharp", "ms_wheels", "ms_framing", "ms_action", "ms_background", "ms_light")
 STYLE_DIMENSIONS = 12
 STYLE_CHOICES = (0, 12, 32)
 L2_CHOICES = (0.3, 1.0, 3.0, 10.0)
@@ -94,6 +104,9 @@ def features(b: dict, pca: dict | None = None) -> np.ndarray:
         "ai_reference": r.get("reference", 0.0),
         "ai_musiq": r.get("musiq", 50.0) / 100,
         "ai_nima": r.get("nima", 5.0),
+        # Slow shutter = intended motion blur (panning), fast = frozen action
+        "shutter_log": math.log(min(max((m.get("exif") or {}).get("exposure_time") or 1 / 250, 1 / 8000), 1.0)),
+        **{key: r.get(key, 0.5) for key in MOTORSPORT_KEYS},
     }
     base = [values[n] for n, _ in FEATURES]
     if pca:
