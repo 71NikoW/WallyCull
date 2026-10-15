@@ -227,6 +227,7 @@ def run(photo_dir, config: dict) -> dict:
              b["group_rank"], b.get("value"), b["id"]),
         )
     db.commit()
+    database.backup(db, photo_dir)
     db.close()
     counts = {k: 0 for k in CATEGORIES}
     for b in images:

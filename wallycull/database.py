@@ -6,10 +6,14 @@ to the photo folder, so a changed drive letter breaks nothing.
 
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import datetime
+import os
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+
+from .paths import USER_DIR
 
 DATA_DIR_NAME = ".wallycull"
 DB_NAME = "wallycull.db"
@@ -142,6 +146,78 @@ def open_db(photo_dir: Path) -> sqlite3.Connection:
     if is_new:
         _migrate_legacy(Path(photo_dir), db)
     return db
+
+
+# --- Backup of your own work on the PC's drive ---------------------------------
+# Ratings, notes and decisions are the only things that cannot be measured again. They are copied to
+# %LOCALAPPDATA%\WallyCull\backups after every change, so a damaged memory card or USB drive cannot take them.
+
+def backup_path(photo_dir: Path) -> Path:
+    folder = os.path.normcase(str(Path(photo_dir).resolve()))
+    return USER_DIR / "backups" / f"{hashlib.sha1(folder.encode()).hexdigest()[:16]}.json"
+
+
+def _read_backup(photo_dir: Path) -> dict:
+    try:
+        return json.loads(backup_path(photo_dir).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def backup(db: sqlite3.Connection, photo_dir: Path) -> None:
+    """Saves the current state for all images in the database. Entries of images the database does not
+    know (yet), e.g. while it is being rebuilt after damage, are kept from the previous backup."""
+    keys = {r[0] for r in db.execute("SELECT key FROM images")}
+    old = _read_backup(photo_dir)
+    ratings = [r for r in old.get("ratings", []) if r["key"] not in keys] + [dict(r) for r in db.execute(
+        "SELECT i.key, r.verdict, r.stars, r.origin, r.time FROM ratings r JOIN images i ON i.id = r.image_id")]
+    annotations = [a for a in old.get("annotations", []) if a["key"] not in keys] + [dict(r) for r in db.execute(
+        "SELECT i.key, a.kind, a.x, a.y, a.w, a.h, a.text, a.time FROM annotations a JOIN images i ON i.id = a.image_id")]
+    choices = {k: v for k, v in old.get("choices", {}).items() if k not in keys}
+    choices.update({r[0]: r[1] for r in db.execute("SELECT key, user_choice FROM images WHERE user_choice IS NOT NULL")})
+    if not (ratings or annotations or choices or old):
+        return
+    data = {"folder": str(Path(photo_dir).resolve()), "time": datetime.now().isoformat(timespec="seconds"),
+            "ratings": ratings, "annotations": annotations, "choices": choices}
+    target = backup_path(photo_dir)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_suffix(".tmp")
+        temp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        temp.replace(target)
+    except OSError as e:  # the backup must never stop the real work
+        print(f"Note: backup of your ratings failed ({e}).", flush=True)
+
+
+def restore_backup(db: sqlite3.Connection, photo_dir: Path) -> int:
+    """Brings back ratings, notes and decisions that are in the backup but missing in the database
+    (new database, or rebuilt after damage). Returns the number of ratings taken over."""
+    data = _read_backup(photo_dir)
+    if not data:
+        return 0
+    ids = {r["key"]: r["id"] for r in db.execute("SELECT id, key FROM images")}
+    rated = {r[0] for r in db.execute("SELECT image_id FROM ratings")}
+    noted = {r[0] for r in db.execute("SELECT DISTINCT image_id FROM annotations")}
+    count = 0
+    for r in data.get("ratings", []):
+        i = ids.get(r["key"])
+        if i is not None and i not in rated:
+            db.execute("INSERT INTO ratings (image_id, verdict, stars, origin, time) VALUES (?, ?, ?, ?, ?)",
+                       (i, r["verdict"], r["stars"], r["origin"], r["time"]))
+            rated.add(i)
+            count += 1
+    for a in data.get("annotations", []):
+        i = ids.get(a["key"])
+        if i is not None and i not in noted:
+            db.execute("INSERT INTO annotations (image_id, kind, x, y, w, h, text, time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                       (i, a["kind"], a["x"], a["y"], a["w"], a["h"], a["text"], a["time"]))
+    for key, choice in data.get("choices", {}).items():
+        if key in ids:
+            db.execute("UPDATE images SET user_choice=? WHERE id=? AND user_choice IS NULL", (choice, ids[key]))
+    db.commit()
+    if count:
+        print(f"Took over {count} of your ratings from the backup on this PC.", flush=True)
+    return count
 
 
 def _migrate_legacy(photo_dir: Path, db: sqlite3.Connection) -> None:

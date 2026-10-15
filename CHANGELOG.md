@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.2 - 2026-10-15
+
+- Your ratings, notes and decisions are backed up on the PC (`%LOCALAPPDATA%\WallyCull\backups`) after
+  every change. When a folder's database has to be started again, the next analysis takes them back.
+- Warning when the photo folder is on a memory card or USB stick: copy it to the PC and work on the copy.
+
 ## 0.9.1 - 2026-10-15
 
 - Fixed: a damaged WallyCull database in a photo folder (e.g. after the memory card was pulled out while

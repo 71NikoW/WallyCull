@@ -13,7 +13,7 @@ import imagehash
 from PIL import Image
 from tqdm import tqdm
 
-from . import ANALYSIS_VERSION, database, loader, quality
+from . import ANALYSIS_VERSION, database, files, loader, quality
 
 _config: dict = {}
 
@@ -105,6 +105,10 @@ def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
     if config["general"]["low_priority"]:
         low_priority()
 
+    if files.on_removable_drive(photo_dir):
+        print("Note: this folder is on a memory card or USB stick. For safety, copy it to your PC and work on "
+              "the copy; card readers can damage files while WallyCull writes its data. "
+              "Your ratings are backed up on the PC in any case.", flush=True)
     print(f"Scanning {photo_dir} ...")
     found = loader.find_images(photo_dir, config)
     known = {r["key"]: r for r in db.execute("SELECT key, size, mtime, version, status FROM images").fetchall()}
@@ -149,6 +153,8 @@ def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
                 db.commit()
                 raise
         db.commit()
+    database.restore_backup(db, photo_dir)  # e.g. after the database had to be started again
+    database.backup(db, photo_dir)
     db.close()
     return {"found": len(found), "analyzed": len(tasks), "errors": errors, "missing": gone}
 

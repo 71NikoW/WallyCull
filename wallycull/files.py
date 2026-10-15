@@ -178,3 +178,13 @@ def purge(photo_dir: Path, config: dict, confirmed: bool = False) -> int:
     _remove_empty_dirs(photo_dir / config["files"]["rejected_folder"])
     print(f"{deleted} files are in the Recycle Bin. They can still be recovered from there if needed.")
     return deleted
+
+
+def on_removable_drive(folder: Path) -> bool:
+    """True for memory cards and USB sticks (Windows). Card readers can damage files while writing."""
+    if os.name != "nt":
+        return False
+    import ctypes
+
+    root = Path(folder).resolve().anchor
+    return ctypes.windll.kernel32.GetDriveTypeW(root) == 2  # DRIVE_REMOVABLE

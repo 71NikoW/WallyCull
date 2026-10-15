@@ -100,6 +100,17 @@ photo counts as "keep" for your model.
 Sends the contents of `_rejected` to the Windows Recycle Bin. Type `DELETE` to confirm. Even then the
 photos can still be recovered from the Recycle Bin until you empty it.
 
+## Memory cards and backups
+
+Work on a copy on your PC, not directly on the memory card: WallyCull writes its data into the photo folder,
+and a flaky card reader can damage files while writing. WallyCull warns you when a folder is on a card or
+USB stick.
+
+Your ratings, notes and decisions are also copied to `%LOCALAPPDATA%\WallyCull\backups` after every change.
+If the folder's database is ever damaged, WallyCull keeps the broken file as
+`.wallycull\wallycull.db.damaged-<date>`, starts a new one, measures the photos again and takes your ratings
+back from the backup.
+
 ## References
 
 Put 20 to 100 photos you consider great wall art (for example your best sellers) into the references

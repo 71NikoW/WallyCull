@@ -83,6 +83,7 @@ class Session:
             )
             db.execute("UPDATE images SET user_choice=? WHERE id=?", (VERDICT_TO_CATEGORY[verdict], image_id))
             db.commit()
+            database.backup(db, self.photo_dir)
             db.close()
             self.since_training += 1
             retrained = False
@@ -99,6 +100,7 @@ class Session:
             db.execute("DELETE FROM ratings WHERE image_id=?", (image_id,))
             db.execute("UPDATE images SET user_choice=NULL WHERE id=?", (image_id,))
             db.commit()
+            database.backup(db, self.photo_dir)
             db.close()
             self.since_training = max(0, self.since_training - 1)
             self.status = {**self.status, **self._counts()}
@@ -115,6 +117,7 @@ class Session:
                 (image_id, kind, x, y, w, h, (text or "").strip() or None),
             )
             db.commit()
+            database.backup(db, self.photo_dir)
             db.close()
         if kind == "subject" and rect:
             # Measure the sharpness on the marked subject right away
@@ -127,6 +130,7 @@ class Session:
             row = db.execute("SELECT image_id, kind FROM annotations WHERE id=?", (annotation_id,)).fetchone()
             db.execute("DELETE FROM annotations WHERE id=?", (annotation_id,))
             db.commit()
+            database.backup(db, self.photo_dir)
             db.close()
         if row and row["kind"] == "subject":
             analyze.reanalyze_one(self.photo_dir, self.config, row["image_id"])

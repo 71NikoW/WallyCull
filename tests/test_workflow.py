@@ -130,3 +130,32 @@ def test_legacy_database_is_migrated(photos, cfg):
     assert image["version"] > 0 and image["metrics"]  # analyzed again with the current version
     assert tuple(note) == ("subject", 0.3, "eyes")
     assert tuple(rating) == (2, "swipe")
+
+
+def test_ratings_survive_a_damaged_database(tmp_path, cfg):
+    """Ratings are backed up on the PC; after the folder database is damaged, the next analysis brings them back."""
+    start = datetime(2026, 5, 1, 12)
+    for i in range(3):
+        _save(tmp_path / f"IMG_{i}.jpg", _sharp(i, (600, 900)), start + timedelta(minutes=i))
+    analyze.run(tmp_path, cfg)
+    db = database.open_db(tmp_path)
+    ids = {r["key"]: r["id"] for r in db.execute("SELECT id, key FROM images")}
+    db.execute("INSERT INTO ratings (image_id, verdict) VALUES (?, 0)", (ids["img_0"],))
+    db.execute("INSERT INTO annotations (image_id, kind, text) VALUES (?, 'other', 'horizon')", (ids["img_1"],))
+    db.execute("UPDATE images SET user_choice='reject' WHERE id=?", (ids["img_0"],))
+    db.commit()
+    database.backup(db, tmp_path)
+    db.close()
+
+    path = database.db_path(tmp_path)
+    path.write_bytes(b"USBC" + bytes(8188))  # garbage like a failing card reader writes
+    for suffix in ("-wal", "-shm"):
+        path.with_name(path.name + suffix).unlink(missing_ok=True)
+    analyze.run(tmp_path, cfg)
+
+    db = database.open_db(tmp_path)
+    rating = db.execute("SELECT i.key, r.verdict, i.user_choice FROM ratings r JOIN images i ON i.id = r.image_id").fetchall()
+    assert [tuple(r) for r in rating] == [("img_0", 0, "reject")]
+    assert db.execute("SELECT text FROM annotations").fetchone()[0] == "horizon"
+    db.close()
+    assert any(".damaged-" in p.name for p in path.parent.iterdir())
