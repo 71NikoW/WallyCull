@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS images (
     embedding   BLOB,                   -- CLIP image features (768 x float16)
     ai_version  INTEGER,
     seen        INTEGER DEFAULT 1,
-    fingerprint TEXT                    -- content check of the source file: the cache survives copying
+    fingerprint TEXT,                   -- content check of the source file: the cache survives copying
+    numbers     TEXT                    -- JSON: start number, driver and team from the entry lists
 );
 CREATE TABLE IF NOT EXISTS moves (
     id        INTEGER PRIMARY KEY,
@@ -110,8 +111,9 @@ def _connect(path: Path) -> sqlite3.Connection:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
         columns = {r[1] for r in db.execute("PRAGMA table_info(images)")}
-        if "fingerprint" not in columns:  # databases from before 0.11
-            db.execute("ALTER TABLE images ADD COLUMN fingerprint TEXT")
+        for column in ("fingerprint", "numbers"):  # databases from before 0.11 / 0.12
+            if column not in columns:
+                db.execute(f"ALTER TABLE images ADD COLUMN {column} TEXT")
     except sqlite3.DatabaseError:
         db.close()
         raise
@@ -325,7 +327,7 @@ def active_images(db: sqlite3.Connection) -> list[dict]:
 
 def row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
-    for field in ("files", "metrics", "reasons", "ai"):
+    for field in ("files", "metrics", "reasons", "ai", "numbers"):
         if d.get(field):
             d[field] = json.loads(d[field])
     return d

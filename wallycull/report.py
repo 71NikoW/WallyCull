@@ -7,7 +7,7 @@ import json
 import webbrowser
 from pathlib import Path
 
-from . import database
+from . import database, numbers
 from .classify import NAMES
 
 TEMPLATE = """<!doctype html>
@@ -41,11 +41,13 @@ table{border-collapse:collapse;font-size:12.5px}td{padding:2px 8px 2px 0}
 <header><h1>WallyCull</h1><span id="filter"></span>
 <select id="sort"><option value="q-">Quality, best first</option><option value="q+">Quality, worst first</option>
 <option value="name">Name</option><option value="date">Capture date</option><option value="group">Bursts together</option></select>
+<select id="car" hidden><option value="">All cars</option></select>
 <span style="color:var(--muted)">%TITLE%</span></header>
 <main id="grid"></main><div id="big"></div>
 <script>
 const IMAGES = %DATA%; const NAMES = %NAMES%;
 let filter = "reject";
+const esc = t => String(t??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const grid = document.getElementById("grid"), big = document.getElementById("big");
 function filterBar(){
   const n = {all: IMAGES.length}; for (const b of IMAGES) n[b.c] = (n[b.c]||0)+1;
@@ -55,7 +57,8 @@ function filterBar(){
 }
 function draw(){
   filterBar();
-  let list = IMAGES.filter(b => filter==="all" || b.c===filter);
+  const car = document.getElementById("car").value;
+  let list = IMAGES.filter(b => (filter==="all" || b.c===filter) && (!car || b.num===car));
   const s = document.getElementById("sort").value;
   list.sort((a,b) => s==="q-" ? b.q-a.q : s==="q+" ? a.q-b.q : s==="date" ? (a.d||"").localeCompare(b.d||"")
     : s==="group" ? ((a.g||1e9)-(b.g||1e9) || (a.r||0)-(b.r||0)) : a.n.localeCompare(b.n));
@@ -64,6 +67,7 @@ function draw(){
     <div class="info"><div class="row"><span class="name" title="${b.p}">${b.n}</span>
     <span class="tag c-${b.c}">${NAMES[b.c]}${b.s==='moved'?' ✓ moved':''}</span></div>
     <div class="reason">Quality ${b.q.toFixed(2)}${b.g?` · ${b.gt==='duplicate'?'Duplicate':'Burst'} ${b.g}, #${b.r}`:''}</div>
+    ${b.nr?`<div class="reason"><b>${esc(b.nr)}</b></div>`:''}
     <div class="reason">${(b.why[0]||'')}</div></div></div>`).join("") : '<div class="empty">No images in this category.</div>';
   grid.querySelectorAll(".card").forEach(k => k.onclick = () => open_(IMAGES[k.dataset.i]));
 }
@@ -72,6 +76,7 @@ function open_(b){
   const rows = Object.entries(sc).map(([k,v]) => `<tr><td>${k}</td><td>${v.toFixed(2)}</td></tr>`).join("");
   big.innerHTML = `<img src="${b.v||''}"><div class="text"><h2 style="margin-top:0">${b.n}</h2>
     <div class="tag c-${b.c}" style="display:inline-block">${NAMES[b.c]}</div>
+    ${b.nr?`<p><b>${esc(b.nr)}</b></p>`:''}
     <p style="word-break:break-all;color:#bbb">${b.p}${b.d?'<br>Taken: '+b.d.replace('T',' '):''}</p>
     <ul>${b.why.map(g => `<li>${g}</li>`).join("")}</ul>
     <table><tr><td><b>Quality</b></td><td><b>${b.q.toFixed(2)}</b></td></tr>${rows}</table>
@@ -81,6 +86,11 @@ function open_(b){
 big.onclick = () => big.classList.remove("open");
 document.onkeydown = e => { if (e.key === "Escape") big.classList.remove("open"); };
 document.getElementById("sort").onchange = draw;
+const cars = {}; for (const b of IMAGES) if (b.num) cars[b.num] = (cars[b.num]||[]).concat(b);
+const carSelect = document.getElementById("car");
+carSelect.innerHTML += Object.keys(cars).sort((a,b) => a-b).map(n =>
+  `<option value="${n}">${esc(cars[n][0].nr)} (${cars[n].length})</option>`).join("");
+carSelect.hidden = !Object.keys(cars).length; carSelect.onchange = draw;
 if (!IMAGES.some(b => b.c === "reject")) filter = "all";
 draw();
 </script></body></html>
@@ -104,6 +114,7 @@ def create(photo_dir: Path, open_browser: bool = False) -> Path:
             "c": b["category"], "q": b["quality"] or 0, "why": b.get("reasons") or [],
             "g": b["group_id"], "gt": b["group_type"], "r": b["group_rank"], "d": b["taken_at"],
             "s": b["status"], "m": m,
+            "num": (b.get("numbers") or {}).get("number"), "nr": numbers.label(b.get("numbers") or None),
         })
     html = (
         TEMPLATE.replace("%DATA%", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))

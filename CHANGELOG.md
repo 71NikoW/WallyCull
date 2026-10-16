@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0 - 2026-10-16
+
+- New: start numbers. WallyCull reads the number on the car and looks up driver and team in the entry lists of
+  DTM 2026 and Porsche Carrera Cup Deutschland 2026 (editable CSV files). The report shows them and can filter
+  by car; `wallycull numbers` exports numbers.csv.
+
 ## 0.11.0 - 2026-10-16
 
 - New: one model for all folders. Ratings from every folder are pooled on the PC, so a new folder is sorted by

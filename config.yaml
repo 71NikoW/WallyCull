@@ -165,3 +165,12 @@ ai:
     reference: 0.25
     content: 0.10
     nima: 0.05
+
+numbers:
+  # Read the start number on the car and look up driver and team in the entry lists (after the AI step).
+  enabled: true
+  # Which entry lists to use (file names without .csv, from wallycull\series and
+  # %LOCALAPPDATA%\WallyCull\series). Empty = all.
+  series: []
+  # Only numbers read at least this confidently count (0..1).
+  min_confidence: 0.5

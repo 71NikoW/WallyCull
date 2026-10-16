@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import ai, analyze, classify, learning, report, signals
+from . import ai, analyze, classify, learning, numbers, report, signals
 from .paths import USER_DIR
 
 SUMMARY = USER_DIR / "night.json"
@@ -91,6 +91,10 @@ def run_folder(folder: Path, config: dict, models: ai.Preload | None = None) -> 
     if model.get("active"):
         print(f"Model trained from {model['rated']} verdicts, accuracy {model['accuracy'] * 100:.0f}%.", flush=True)
     result["counts"] = classify.run(folder, config)
+    try:
+        result["numbers"] = numbers.run(folder, config)
+    except Exception as e:  # start numbers are a bonus
+        print(f"Start numbers skipped: {type(e).__name__}: {e}")
     report.create(folder)
     result["hint"] = _hint(result, config)
     result["minutes"] = round((time.time() - started) / 60, 1)

@@ -19,6 +19,7 @@ elif sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
 else:
     USER_DIR = Path.home() / ".wallycull"
 AI_PACKAGES_DIR = USER_DIR / "ai-packages"
+OCR_PACKAGES_DIR = USER_DIR / "ocr-packages"  # start number recognition
 MODELS_DIR = USER_DIR / "models"
 REFERENCES_DIR = USER_DIR / "references"
 # Installed by the setup: bundled Python inside the program folder
@@ -55,7 +56,8 @@ def setup() -> None:
     """Make the AI packages (kept apart from the program so updates stay small) and the model cache known."""
     if USER_DIR.is_dir():
         _migrate_legacy()
-    if AI_PACKAGES_DIR.is_dir() and str(AI_PACKAGES_DIR) not in sys.path:
-        sys.path.append(str(AI_PACKAGES_DIR))  # appended: the bundled packages take precedence
+    for folder in (AI_PACKAGES_DIR, OCR_PACKAGES_DIR):
+        if folder.is_dir() and str(folder) not in sys.path:
+            sys.path.append(str(folder))  # appended: the bundled packages take precedence
     os.environ.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))
     os.environ.setdefault("TORCH_HOME", str(MODELS_DIR / "torch"))

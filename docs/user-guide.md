@@ -124,6 +124,18 @@ Every folder learns from your ratings in all your other folders as well (stored 
 right after the analysis, before you rate a single photo there. To keep folders separate, set
 `learning: shared: false` in your settings.
 
+## Start numbers
+
+After the AI step, WallyCull reads the start number on the car (locally, no internet; the small text
+recognition is installed once, about 60 MB) and looks it up in the entry lists of DTM 2026 and Porsche Carrera
+Cup Deutschland 2026. The report then shows e.g. "#91 Thomas Preining (Manthey Racing, DTM 2026)" and has a
+car filter. Only numbers from an entry list count, so sponsor text is ignored. Numbers used in two series
+show both drivers.
+
+The entry lists are CSV files (`number,driver,team,car`) in the program's `wallycull\series` folder. Put a
+corrected or additional list into `%LOCALAPPDATA%\WallyCull\series` (same file name replaces the built-in one).
+`wallycull numbers <folder>` reads the numbers and saves `.wallycull\numbers.csv` with every photo per driver.
+
 ## References
 
 Put 20 to 100 photos you consider great wall art (for example your best sellers) into the references

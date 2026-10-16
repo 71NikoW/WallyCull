@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import __version__, ai, analyze, classify, config, files, learning, report
+from . import __version__, ai, analyze, classify, config, files, learning, numbers, report
 
 
 def _folder(path: str) -> Path:
@@ -73,6 +73,10 @@ def main(argv: list[str] | None = None) -> None:
     t = sub.add_parser("train", help="train the model from all ratings and classify again")
     t.add_argument("folder")
 
+    nu = sub.add_parser("numbers", help="read start numbers, look up driver and team, export numbers.csv")
+    nu.add_argument("folder")
+    nu.add_argument("--recompute", action="store_true", help="read all images again")
+
     n = sub.add_parser("annotations", help="export your notes (wrongly analyzed images) as CSV")
     n.add_argument("folder")
 
@@ -136,6 +140,13 @@ def main(argv: list[str] | None = None) -> None:
             print(f"Sorted by your taste from {status['shared']} ratings in {status['shared_folders']} other folders.")
     if args.command in ("analyze", "classify"):
         _print_counts(classify.run(folder, cfg))
+        if args.command == "analyze" and not args.no_ai:
+            try:
+                numbers.run(folder, cfg, recompute=args.recompute)
+            except KeyboardInterrupt:
+                sys.exit(1)
+            except Exception as e:  # start numbers are a bonus
+                print(f"Start numbers skipped: {type(e).__name__}: {e}")
         target = report.create(folder, open_browser=not args.no_browser)
         print(f"Report: {target}")
         print("No files were changed. Next step: 'reject' (first only shows what would happen).")
@@ -164,6 +175,10 @@ def main(argv: list[str] | None = None) -> None:
         else:
             print(status["hint"])
         _print_counts(classify.run(folder, cfg))
+        report.create(folder)
+    elif args.command == "numbers":
+        numbers.run(folder, cfg, recompute=args.recompute)
+        print(f"Saved: {numbers.export_csv(folder)}")
         report.create(folder)
     elif args.command == "annotations":
         print(f"Saved: {report.export_annotations(folder)}")
