@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from PIL import Image
 
-from . import ai, analyze, classify, database, learning, loader, report
+from . import ai, analyze, classify, database, learning, loader, numbers, report
 
 VERDICT_TO_CATEGORY = {0: "reject", 1: "keep", 2: "highlight"}
 STARS_TO_VERDICT = {1: 0, 2: 0, 3: 1, 4: 1, 5: 2}
@@ -66,7 +66,7 @@ class Session:
                 "reasons": [r for r in (b.get("reasons") or [])
                             if not r.startswith(("Your model",) + ai.AI_REASON_PREFIXES)][:4],
                 "edge_width": m.get("edge_width_100"), "print_cm": m.get("print_cm"),
-                "ai": ai.ai_reasons(b), "prediction": None, "annotations": b.get("annotations") or [],
+                "ai": ai.ai_reasons(b), "car": numbers.label(b.get("numbers")), "prediction": None, "annotations": b.get("annotations") or [],
             }
             if model and b.get("personal") is not None:
                 pro, con = learning.explain(model, learning.features(b, model.get("pca")))
@@ -380,7 +380,7 @@ function next(){
   }
   card=document.createElement("div"); card.className="card";
   card.innerHTML=`<img src="/image/${b.id}/large" alt=""><span class="stamp no">REJECT</span><span class="stamp yes">KEEP</span><span class="stamp fav">FAVORITE</span>
-   <div class="info"><div><b>${esc(b.name)}</b> <span class="muted">${b.date?b.date.replace("T"," "):""} · quality ${(b.quality||0).toFixed(2)}${b.edge_width?` · edge width ${b.edge_width} px`:""}</span>${pred}</div>
+   <div class="info">${b.car?`<div style="font-size:1.1em"><b>${esc(b.car)}</b></div>`:""}<div><b>${esc(b.name)}</b> <span class="muted">${b.date?b.date.replace("T"," "):""} · quality ${(b.quality||0).toFixed(2)}${b.edge_width?` · edge width ${b.edge_width} px`:""}</span>${pred}</div>
    ${b.ai&&b.ai.length?`<div class="reasons" style="color:var(--accent)">${b.ai.map(esc).join(" · ")}</div>`:""}
    <div class="reasons">${b.reasons.map(esc).join(" · ")}</div></div>`;
   stage.appendChild(card); swipeable(card);

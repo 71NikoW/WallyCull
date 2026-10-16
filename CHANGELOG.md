@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1 - 2026-10-16
+
+- The driver is now also shown while rating (above the photo) and the overview says on how many images a start
+  number was found, or that the numbers have not been read yet (they are read during "Analyze").
+
 ## 0.12.0 - 2026-10-16
 
 - New: start numbers. WallyCull reads the number on the car and looks up driver and team in the entry lists of

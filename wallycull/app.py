@@ -188,6 +188,13 @@ class App:
                 "analyzed": db.execute("SELECT COUNT(*) FROM images WHERE status='active' AND version > 0").fetchone()[0],
                 "updated": time.strftime("%Y-%m-%d %H:%M", time.localtime(path.stat().st_mtime)),
             }
+            try:  # start numbers (column exists from 0.12 on)
+                stats["cars"] = db.execute("SELECT COUNT(*) FROM images WHERE status='active' "
+                                           "AND numbers LIKE '%\"number\"%'").fetchone()[0]
+                stats["cars_read"] = db.execute("SELECT COUNT(*) FROM images WHERE status='active' "
+                                                "AND numbers IS NOT NULL").fetchone()[0]
+            except sqlite3.Error:
+                stats["cars"] = stats["cars_read"] = 0
         except sqlite3.Error:
             return None
         finally:
@@ -709,7 +716,7 @@ function draw(j){
   if(s){
     $("#numbers").innerHTML=["highlight","keep","review","reject"].map(k=>`<div class="number c-${k}"><b>${s.categories[k]}</b>${j.names[k]}</div>`).join("");
     const m=s.model?`personal model active (${Math.round(s.model.accuracy*100)}% accuracy)`:"personal model starts at 40 ratings";
-    $("#details").textContent=`${s.total} images · ${s.rated} rated · ${m} · AI scores for ${s.with_ai} images · ${s.moved} in ${j.rejected_folder} · updated ${s.updated}`
+    $("#details").textContent=`${s.total} images · ${s.rated} rated · ${m} · AI scores for ${s.with_ai} images · ${s.cars_read?`start number found on ${s.cars} of ${s.cars_read} images`:"start numbers not read yet (run Analyze)"} · ${s.moved} in ${j.rejected_folder} · updated ${s.updated}`
       +(s.analyzed<s.total?` · ${s.total-s.analyzed} not analyzed yet`:"");
   }
   document.querySelectorAll("[data-folder]").forEach(b=>b.disabled=!j.folder||running);
