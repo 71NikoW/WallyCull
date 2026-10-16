@@ -35,6 +35,8 @@ general:
 files:
   raw: [.raf, .cr2, .cr3, .nef, .arw, .dng, .orf, .rw2, .pef]
   image: [.jpg, .jpeg, .png, .tif, .tiff, .webp]
+  # Where "Import from memory card" copies to. Empty = Pictures\WallyCull\<date>_<card folder>.
+  import_folder: ""
   # Sidecar files are not analyzed, but always moved together with their image.
   sidecar: [.xmp, .pp3, .dop]
   # These folders are skipped when scanning (folders starting with "." always are).
@@ -126,6 +128,9 @@ learning:
   # From this many ratings (and at least min_per_side on each side) a model is trained.
   min_ratings: 40
   min_per_side: 10
+  # Learn from the ratings of ALL your photo folders (kept on the PC), so a new folder is sorted by your taste
+  # right away. false = every folder only learns from its own ratings.
+  shared: true
   # Retrain automatically after this many new ratings.
   retrain_every: 10
   # Regularization strength (higher = more cautious model).

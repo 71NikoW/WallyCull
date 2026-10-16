@@ -37,6 +37,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
 
+    im = sub.add_parser("import", help="copy a memory card folder to the PC and check every file against the card")
+    im.add_argument("source", help="folder on the memory card, e.g. E:\\DCIM\\100_FUJI")
+    im.add_argument("--to", help="target folder (default: Pictures\\WallyCull\\<date>_<card folder>)")
+
     a = sub.add_parser("analyze", help="measure images, classify them, create the report (touches no files)")
     a.add_argument("folder")
     a.add_argument("--recompute", action="store_true", help="ignore the cache and measure everything again")
@@ -99,6 +103,11 @@ def main(argv: list[str] | None = None) -> None:
 
         night.run(cfg, [_folder(f) for f in args.folders])
         return
+    if args.command == "import":
+        from . import importer
+
+        result = importer.run(_folder(args.source), Path(args.to) if args.to else None, cfg)
+        sys.exit(1 if result["failed"] or result["conflicts"] else 0)
     if args.command == "download-models":
         from . import ai_setup
 
@@ -121,6 +130,10 @@ def main(argv: list[str] | None = None) -> None:
                 sys.exit(1)
             except Exception as e:  # AI problems must not block the classic analysis
                 print(f"AI analysis skipped: {type(e).__name__}: {e}")
+        # A new folder is sorted by what you taught WallyCull in your other folders right away
+        status = learning.train(folder, cfg)
+        if status["active"] and not status["rated"]:
+            print(f"Sorted by your taste from {status['shared']} ratings in {status['shared_folders']} other folders.")
     if args.command in ("analyze", "classify"):
         _print_counts(classify.run(folder, cfg))
         target = report.create(folder, open_browser=not args.no_browser)

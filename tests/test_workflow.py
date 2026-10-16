@@ -159,3 +159,22 @@ def test_ratings_survive_a_damaged_database(tmp_path, cfg):
     assert db.execute("SELECT text FROM annotations").fetchone()[0] == "horizon"
     db.close()
     assert any(".damaged-" in p.name for p in path.parent.iterdir())
+
+
+def test_cache_survives_copy_and_sidecars(photos, cfg, tmp_path):
+    """A new .xmp or a changed file date (e.g. after copying) does not mean measuring everything again."""
+    import os
+    import shutil
+
+    analyze.run(photos, cfg)
+    (photos / "DSCF0002.xmp").write_text("<x/>")  # stars from Lightroom
+    for f in photos.glob("*.JPG"):
+        os.utime(f, (1_000_000_000, 1_000_000_000))  # copy tool that does not keep dates
+    assert analyze.run(photos, cfg)["analyzed"] == 0
+    # A really changed image is measured again
+    _save(photos / "DSCF0003.JPG", _sharp(42), datetime(2026, 5, 1, 12, 30))
+    assert analyze.run(photos, cfg)["analyzed"] == 1
+    # The whole folder copied elsewhere (database included) keeps its measurements
+    copy = tmp_path / "copy"
+    shutil.copytree(photos, copy)
+    assert analyze.run(copy, cfg)["analyzed"] == 0

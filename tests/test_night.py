@@ -103,3 +103,28 @@ def test_rating_inside_fuji_raf(tmp_path):
     raf = tmp_path / "DSCF0001.RAF"
     raf.write_bytes(header.ljust(160, b"\0") + jpg.getvalue() + b"\0" * 64)
     assert signals.read_rating(tmp_path, ["DSCF0001.RAF"], {".xmp"}) == 5
+
+
+def test_new_folder_uses_ratings_of_other_folders(rated_photos, cfg, monkeypatch, tmp_path):
+    """Shared training: a folder without any ratings is sorted by what was learned in another folder."""
+    monkeypatch.setattr(night, "SUMMARY", tmp_path / "night.json")
+    night.run(cfg, [rated_photos])
+    fresh = tmp_path / "next-race-day"
+    fresh.mkdir()
+    for f in rated_photos.glob("*.JPG"):
+        (fresh / f.name).write_bytes(f.read_bytes())
+    from wallycull import analyze
+
+    analyze.run(fresh, cfg)
+    status = learning.train(fresh, cfg)
+    assert status["rated"] == 0 and status["shared"] == 11 and status["active"] is True
+    db = database.open_db(fresh)
+    personal = {r["key"]: r["personal"] for r in db.execute("SELECT key, personal FROM images")}
+    db.close()
+    assert all(v is not None for v in personal.values())
+    sharp = np.mean([v for k, v in personal.items() if int(k[-3:]) % 2 == 0])
+    soft = np.mean([v for k, v in personal.items() if int(k[-3:]) % 2 == 1])
+    assert sharp > soft
+
+    cfg["learning"]["shared"] = False
+    assert learning.train(fresh, cfg)["active"] is False

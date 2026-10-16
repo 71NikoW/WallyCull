@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS images (
     ai          TEXT,                   -- JSON with AI scores (aesthetic, content, ...)
     embedding   BLOB,                   -- CLIP image features (768 x float16)
     ai_version  INTEGER,
-    seen        INTEGER DEFAULT 1
+    seen        INTEGER DEFAULT 1,
+    fingerprint TEXT                    -- content check of the source file: the cache survives copying
 );
 CREATE TABLE IF NOT EXISTS moves (
     id        INTEGER PRIMARY KEY,
@@ -108,6 +109,9 @@ def _connect(path: Path) -> sqlite3.Connection:
     try:
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(SCHEMA)
+        columns = {r[1] for r in db.execute("PRAGMA table_info(images)")}
+        if "fingerprint" not in columns:  # databases from before 0.11
+            db.execute("ALTER TABLE images ADD COLUMN fingerprint TEXT")
     except sqlite3.DatabaseError:
         db.close()
         raise
@@ -168,9 +172,13 @@ def open_db(photo_dir: Path) -> sqlite3.Connection:
 # Ratings, notes and decisions are the only things that cannot be measured again. They are copied to
 # %LOCALAPPDATA%\WallyCull\backups after every change, so a damaged memory card or USB drive cannot take them.
 
-def backup_path(photo_dir: Path) -> Path:
+def folder_key(photo_dir: Path) -> str:
     folder = os.path.normcase(str(Path(photo_dir).resolve()))
-    return USER_DIR / "backups" / f"{hashlib.sha1(folder.encode()).hexdigest()[:16]}.json"
+    return hashlib.sha1(folder.encode()).hexdigest()[:16]
+
+
+def backup_path(photo_dir: Path) -> Path:
+    return USER_DIR / "backups" / f"{folder_key(photo_dir)}.json"
 
 
 def _read_backup(photo_dir: Path) -> dict:
@@ -291,17 +299,18 @@ def save_image(db: sqlite3.Connection, e: dict) -> None:
     db.execute(
         """
         INSERT INTO images (key, files, source, size, mtime, version, width, height, taken_at, camera,
-                            phash, dhash, metrics, quality, preview, error, status, seen)
+                            phash, dhash, metrics, quality, preview, error, status, seen, fingerprint)
         VALUES (:key, :files, :source, :size, :mtime, :version, :width, :height, :taken_at, :camera,
-                :phash, :dhash, :metrics, :quality, :preview, :error, 'active', 1)
+                :phash, :dhash, :metrics, :quality, :preview, :error, 'active', 1, :fingerprint)
         ON CONFLICT(key) DO UPDATE SET
             files=excluded.files, source=excluded.source, size=excluded.size, mtime=excluded.mtime,
             version=excluded.version, width=excluded.width, height=excluded.height,
             taken_at=excluded.taken_at, camera=excluded.camera, phash=excluded.phash, dhash=excluded.dhash,
             metrics=excluded.metrics, quality=excluded.quality, preview=excluded.preview,
-            error=excluded.error, status='active', seen=1
+            error=excluded.error, status='active', seen=1, fingerprint=excluded.fingerprint
         """,
         {
+            "fingerprint": None,
             **e,
             "files": json.dumps(e["files"], ensure_ascii=False),
             "metrics": json.dumps(e.get("metrics") or {}, ensure_ascii=False),

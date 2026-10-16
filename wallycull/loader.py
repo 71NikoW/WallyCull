@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 from datetime import datetime
@@ -22,6 +23,21 @@ _ISO = 0x8827
 _EXPOSURE_TIME = 0x829A
 _APERTURE = 0x829D
 _FOCAL_LENGTH = 0x920A
+
+
+def fingerprint(path: Path) -> str:
+    """Size plus the first and last 64 KB: recognizes the same file after copying (when the date changed)."""
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        h.update(str(size).encode())
+        f.seek(0)
+        h.update(f.read(65536))
+        if size > 131072:
+            f.seek(-65536, os.SEEK_END)
+            h.update(f.read(65536))
+    return h.hexdigest()[:20]
 
 
 def find_images(photo_dir: Path, config: dict) -> list[dict]:
@@ -55,12 +71,17 @@ def find_images(photo_dir: Path, config: dict) -> list[dict]:
         if not (g["image"] or g["raw"]):
             continue  # sidecar files without an image
         g["source"] = g["image"] or g["raw"]  # the camera JPG is faster and shows the film simulation
-        size, mtime = 0, 0.0
+        # Only the image files count: a new or changed .xmp (e.g. stars from Lightroom) is no reason to measure again
+        size, mtime, size_all, mtime_all = 0, 0.0, 0, 0.0
         for rel in g["files"]:
             st = (photo_dir / rel).stat()
-            size += st.st_size
-            mtime = max(mtime, st.st_mtime)
+            size_all += st.st_size
+            mtime_all = max(mtime_all, st.st_mtime)
+            if Path(rel).suffix.lower() not in sidecar:
+                size += st.st_size
+                mtime = max(mtime, st.st_mtime)
         g["size"], g["mtime"] = size, mtime
+        g["size_all"], g["mtime_all"] = size_all, mtime_all  # how versions before 0.11 counted
         result.append(g)
     result.sort(key=lambda g: g["key"])
     return result

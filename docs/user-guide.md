@@ -103,13 +103,26 @@ photos can still be recovered from the Recycle Bin until you empty it.
 ## Memory cards and backups
 
 Work on a copy on your PC, not directly on the memory card: WallyCull writes its data into the photo folder,
-and a flaky card reader can damage files while writing. WallyCull warns you when a folder is on a card or
-USB stick.
+and a flaky card reader can damage files while writing.
+
+When you choose a folder on a memory card, the app shows step **0. Import from memory card**. It copies
+everything (photos, sidecars, videos) to `Pictures\WallyCull\<date>_<card folder>`, then reads the card and
+the copy again, bypassing the Windows file cache, and compares them bit for bit. A wrong copy is copied again;
+the card is only ever read. Afterwards the app switches to the copy. An interrupted import simply continues.
+Only format the card when the import says everything is identical. On the command line:
+`wallycull import E:\DCIM\100_FUJI` (optionally `--to D:\Photos\Race`).
 
 Your ratings, notes and decisions are also copied to `%LOCALAPPDATA%\WallyCull\backups` after every change.
 If the folder's database is ever damaged, WallyCull keeps the broken file as
 `.wallycull\wallycull.db.damaged-<date>`, starts a new one, measures the photos again and takes your ratings
 back from the backup.
+
+## One model for all folders
+
+Every folder learns from your ratings in all your other folders as well (stored as numbers, not photos, in
+`%LOCALAPPDATA%\WallyCull\training`). A new folder from the next race day is therefore sorted by your taste
+right after the analysis, before you rate a single photo there. To keep folders separate, set
+`learning: shared: false` in your settings.
 
 ## References
 

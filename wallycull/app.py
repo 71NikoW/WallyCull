@@ -35,7 +35,7 @@ PROGRESS = re.compile(r"^\s*(?P<title>[^:|]{1,40}):\s*(?P<pct>\d+)%\|.*?\|\s*(?P
 TITLES = {
     "analyze": "Analysis", "classify": "Classify", "reject": "Move rejects",
     "restore": "Restore", "purge": "Recycle Bin", "setup-ai": "Set up AI",
-    "update": "Update", "rollback": "Previous version", "night": "Overnight run",
+    "update": "Update", "rollback": "Previous version", "night": "Overnight run", "import": "Import from card",
 }
 APP_ID = "wallycull"
 
@@ -128,6 +128,7 @@ class App:
         self.last_contact = time.time()
         self.server: ThreadingHTTPServer | None = None
         self.stop = threading.Event()
+        self._card_cache: dict = {}
         self.ai = ai.available()[0]
 
     # ----- State ---------------------------------------------------------------------------------
@@ -204,8 +205,25 @@ class App:
             "recent": [r for r in self.state["recent"] if Path(r).is_dir()], "stats": self.stats(),
             "task": self.task.as_dict() if self.task else None, "ai": self.ai,
             "update": {k: v for k, v in self.update.items() if not k.startswith("_")},
+            "on_card": self._on_card(),
             "night": night.last_summary(), "names": NAMES, "rejected_folder": self.config["files"]["rejected_folder"], "confirm_word": CONFIRM_WORD,
         }
+
+    def _on_card(self) -> str | None:
+        """Where an import of the chosen folder would go, if the folder is on a memory card."""
+        if not self.folder:
+            return None
+        if self._card_cache.get("folder") != str(self.folder):
+            from . import files, importer
+
+            target = None
+            try:
+                if files.on_removable_drive(self.folder):
+                    target = str(importer.default_target(self.folder, self.config))
+            except OSError:
+                pass
+            self._card_cache = {"folder": str(self.folder), "target": target}
+        return self._card_cache["target"]
 
     def reject_preview(self) -> dict:
         rows = self._query("SELECT id, source, preview, reasons, size FROM images WHERE status='active' "
@@ -245,7 +263,9 @@ class App:
             if not self.folder:
                 raise RuntimeError("Choose a photo folder first")
             f = str(self.folder)
-            if kind == "analyze":
+            if kind == "import":
+                args, cancellable = ["import", f], True
+            elif kind == "analyze":
                 args, cancellable = ["analyze", f, "--no-browser"] + (["--recompute"] if data.get("recompute") else []), True
             elif kind == "classify":
                 args, cancellable = ["classify", f, "--no-browser"], True
@@ -273,6 +293,11 @@ class App:
     def _after_task(self, task: Task) -> None:
         with self.lock:
             self.session = None
+        if task.kind == "import" and task.exit_code == 0:
+            # Continue with the checked copy on the PC, never with the card
+            target = next((line[len("IMPORTED "):] for line in reversed(task.log) if line.startswith("IMPORTED ")), None)
+            if target:
+                self.set_folder(target)
         if task.kind == "setup-ai":
             import importlib
 
@@ -621,6 +646,8 @@ pre{margin:6px 0 0;max-height:150px;overflow:auto;font:12px/1.45 Consolas,monosp
     <div class="numbers" id="numbers"></div><div class="muted small" id="details"></div>
   </section>
   <section class="card"><h2>Steps</h2>
+    <div class="step" id="importstep" hidden><div class="nr">0</div><div><h3>Import from memory card</h3><p>This folder is on a memory card. WallyCull copies everything to <b id="importtarget"></b>, reads the card and the copy again and compares them bit for bit, and then continues with the copy. The card is only read, never written.</p></div>
+      <div class="row"><button class="primary" data-task="import" data-folder>Import</button></div></div>
     <div class="step"><div class="nr">1</div><div><h3>Analyze</h3><p>Measures sharpness, exposure and bursts, and (with AI) aesthetics and wall-art potential. Changes no files. Runs in the background.</p>
       <label class="small muted"><input type="checkbox" id="recompute"> measure everything again (otherwise only new images)</label></div>
       <div class="row"><button class="primary" data-task="analyze" data-folder>Analyze</button></div></div>
@@ -674,6 +701,7 @@ function draw(j){
   const old=S; S=j;
   $("#version").textContent="Version "+j.version;
   $("#path").textContent=j.folder||"No folder chosen yet";
+  $("#importstep").hidden=!j.on_card;$("#importtarget").textContent=j.on_card||"";
   document.querySelectorAll(".rejname").forEach(e=>e.textContent=j.rejected_folder);
   $("#recent").innerHTML=j.recent.filter(r=>r!==j.folder).map(r=>`<button data-path="${esc(r)}" title="${esc(r)}">${esc(r)}</button>`).join("");
   const s=j.stats, running=j.task&&["running","cancelling"].includes(j.task.status);

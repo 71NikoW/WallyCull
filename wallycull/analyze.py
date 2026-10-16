@@ -52,12 +52,13 @@ def analyze_image(task: dict) -> dict:
     photo_dir = Path(task["photo_dir"])
     result = {
         "key": task["key"], "files": task["files"], "source": task["source"], "size": task["size"],
-        "mtime": task["mtime"], "version": ANALYSIS_VERSION,
+        "mtime": task["mtime"], "version": ANALYSIS_VERSION, "fingerprint": None,
         "width": None, "height": None, "taken_at": None, "camera": None,
         "phash": None, "dhash": None, "metrics": {}, "quality": None, "preview": None, "error": None,
     }
     raw_ext = set(c["files"]["raw"])
     try:
+        result["fingerprint"] = loader.fingerprint(photo_dir / task["source"])
         rgb, info, full_gray = loader.load_image(
             photo_dir / task["source"], raw_ext, c["general"]["analysis_size"],
             full=c["general"].get("full_resolution", True),
@@ -97,6 +98,22 @@ def worker_count(config: dict) -> int:
     return wanted if wanted > 0 else max(1, (os.cpu_count() or 2) - 2)
 
 
+def _still_current(old, g: dict, photo_dir: Path) -> bool:
+    """Can the stored measurement be used? Same file, same analysis version."""
+    if old is None or old["status"] != "active" or old["version"] != ANALYSIS_VERSION:
+        return False
+    if old["size"] == g["size"] and abs((old["mtime"] or 0) - g["mtime"]) < 1:
+        return True
+    if old["size"] == g["size_all"] and abs((old["mtime"] or 0) - g["mtime_all"]) < 1:
+        return True  # stored by a version before 0.11, which also counted the .xmp files
+    if old["fingerprint"]:  # copied or touched: the date changed, but is the content the same?
+        try:
+            return loader.fingerprint(photo_dir / g["source"]) == old["fingerprint"]
+        except OSError:
+            return False
+    return False
+
+
 def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
     """Analyzes all new or changed images. Images measured before come from the cache."""
     photo_dir = Path(photo_dir).resolve()
@@ -111,19 +128,17 @@ def run(photo_dir: Path, config: dict, recompute: bool = False) -> dict:
               "Your ratings are backed up on the PC in any case.", flush=True)
     print(f"Scanning {photo_dir} ...")
     found = loader.find_images(photo_dir, config)
-    known = {r["key"]: r for r in db.execute("SELECT key, size, mtime, version, status FROM images").fetchall()}
+    known = {r["key"]: r for r in db.execute(
+        "SELECT key, size, mtime, version, status, fingerprint FROM images").fetchall()}
     annotations = database.annotations_by_image(db)
     subjects = {r["key"]: database.subject_area(annotations.get(r["id"])) for r in db.execute("SELECT id, key FROM images")}
     db.execute("UPDATE images SET seen = 0 WHERE status = 'active'")
     tasks = []
     for g in found:
         old = known.get(g["key"])
-        current = (
-            old is not None and old["status"] == "active" and old["size"] == g["size"]
-            and abs((old["mtime"] or 0) - g["mtime"]) < 1 and old["version"] == ANALYSIS_VERSION
-        )
-        if current and not recompute:
-            db.execute("UPDATE images SET seen = 1 WHERE key = ?", (g["key"],))
+        current = not recompute and _still_current(old, g, photo_dir)
+        if current:
+            db.execute("UPDATE images SET seen = 1, size = ?, mtime = ? WHERE key = ?", (g["size"], g["mtime"], g["key"]))
         else:
             tasks.append({**g, "photo_dir": str(photo_dir), "subject": subjects.get(g["key"])})
     # Images that are gone (deleted or moved by you) no longer count

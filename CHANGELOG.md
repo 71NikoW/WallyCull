@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-10-16
+
+- New: one model for all folders. Ratings from every folder are pooled on the PC, so a new folder is sorted by
+  your taste right after its analysis (`learning.shared`, on by default).
+- New: import from memory card (app step 0, `wallycull import`). Copies everything to the PC, checks every
+  file against the card bit for bit (bypassing the file cache), copies wrong ones again, never writes to the
+  card, then continues with the copy.
+- Faster: a new or changed .xmp, or a copy that changed the file dates, no longer makes WallyCull measure the
+  photos again. The content of each file is recognized instead.
+
 ## 0.10.3 - 2026-10-16
 
 - Fixed: a write-protected memory card or read-only folder was reported as a "damaged database still in

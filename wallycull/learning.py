@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from . import database
+from .paths import USER_DIR
 
 # (name in the vector, label used in explanations)
 FEATURES = [
@@ -113,15 +114,21 @@ def features(b: dict, pca: dict | None = None) -> np.ndarray:
     }
     base = [values[n] for n, _ in FEATURES]
     if pca:
-        e = embedding(b)
-        style = (e - np.array(pca["mean"])) @ np.array(pca["axes"]).T if e is not None else np.zeros(len(pca["axes"]))
-        base.extend(style.tolist())
+        base.extend(_style(embedding(b), pca).tolist())
     return np.array(base, dtype=np.float64)
 
 
-def _pca(images: list[dict], dims: int = STYLE_DIMENSIONS) -> dict | None:
+def _style(e: np.ndarray | None, pca: dict) -> np.ndarray:
+    if e is None or len(e) != len(pca["mean"]):
+        return np.zeros(len(pca["axes"]))
+    return (e - np.array(pca["mean"])) @ np.array(pca["axes"]).T
+
+
+def _pca(embs: list[np.ndarray], dims: int = STYLE_DIMENSIONS) -> dict | None:
     """Principal components of the CLIP features of all images: condenses subject and style into a few numbers."""
-    embs = [e for e in (embedding(b) for b in images) if e is not None]
+    if embs:  # only features of one kind of CLIP model can be combined
+        size = max({len(e) for e in embs}, key=[len(e) for e in embs].count)
+        embs = [e for e in embs if len(e) == size]
     if not dims or len(embs) < dims * 3:
         return None
     x = np.array(embs)
@@ -196,6 +203,70 @@ def load_model(photo_dir: Path) -> dict | None:
         return None
     # A model from an older version with different features is replaced at the next training
     return model if model.get("features") == [n for n, _ in FEATURES] and "pca" in model else None
+
+
+# --- Shared training across all photo folders ---------------------------------------
+# The ratings of every folder are kept (as feature vectors, without the photos) in %LOCALAPPDATA%\WallyCull\training.
+# Every folder trains on its own ratings plus those of all other folders, so a new folder from the next race
+# day is sorted by your taste right away.
+
+def pool_dir() -> Path:
+    return USER_DIR / "training"
+
+
+def _save_pool(photo_dir: Path, examples: list[dict], y: np.ndarray) -> None:
+    path = pool_dir() / f"{database.folder_key(photo_dir)}.npz"
+    try:
+        if not examples:
+            path.unlink(missing_ok=True)
+            return
+        embs = [embedding(b) for b in examples]
+        size = max((len(e) for e in embs if e is not None), default=0)
+        emb = np.zeros((len(examples), size), np.float16)
+        has = np.zeros(len(examples), bool)
+        for i, e in enumerate(embs):
+            if e is not None and len(e) == size:
+                emb[i], has[i] = e, True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp.npz")
+        np.savez_compressed(tmp, base=np.array([features(b) for b in examples], np.float32), emb=emb, has=has,
+                            y=y.astype(np.float32), names=np.array([n for n, _ in FEATURES]),
+                            folder=np.array(str(Path(photo_dir).resolve())))
+        tmp.replace(path)
+    except OSError:
+        pass  # the shared training is a bonus; the folder's own model works without it
+
+
+def load_pool(photo_dir: Path | None, config: dict) -> dict:
+    """Ratings of all OTHER folders: base feature vectors, CLIP features (or None) and verdicts."""
+    pool = {"base": [], "emb": [], "y": [], "folders": 0}
+    if not config["learning"].get("shared", True) or not pool_dir().exists():
+        return pool
+    own = database.folder_key(photo_dir) if photo_dir else None
+    names = [n for n, _ in FEATURES]
+    for path in sorted(pool_dir().glob("*.npz")):
+        if path.stem == own or path.name.endswith(".tmp.npz"):
+            continue
+        try:
+            with np.load(path, allow_pickle=False) as data:
+                if list(data["names"]) != names:
+                    continue  # from an older version with other features: replaced when that folder is trained
+                pool["base"].extend(data["base"].astype(np.float64))
+                pool["emb"].extend(e.astype(np.float64) if h else None for e, h in zip(data["emb"], data["has"]))
+                pool["y"].extend(data["y"].astype(np.float64))
+                pool["folders"] += 1
+        except (OSError, ValueError, KeyError):
+            continue
+    return pool
+
+
+def _pool_vectors(pool: dict, pca: dict | None) -> np.ndarray:
+    if not pool["y"]:
+        return np.zeros((0, len(FEATURES) + (len(pca["axes"]) if pca else 0)))
+    base = np.array(pool["base"])
+    if not pca:
+        return base
+    return np.hstack([base, np.array([_style(e, pca) for e in pool["emb"]])])
 
 
 def _with_annotations(db, rows) -> list[dict]:
@@ -277,13 +348,17 @@ def train(photo_dir: Path, config: dict, thorough: bool = False) -> dict:
         "SELECT i.*, r.verdict, r.origin FROM images i JOIN ratings r ON r.image_id = i.id "
         "WHERE i.metrics IS NOT NULL AND i.error IS NULL AND i.version > 0"
     ).fetchall())
-    y = np.array([1.0 if b["verdict"] >= 1 else 0.0 for b in examples])
+    y_own = np.array([1.0 if b["verdict"] >= 1 else 0.0 for b in examples])
+    _save_pool(photo_dir, examples, y_own)
+    pool = load_pool(photo_dir, config)
+    y = np.concatenate([y_own, np.array(pool["y"])])
     origins = {}
     for b in examples:
         origins[b["origin"]] = origins.get(b["origin"], 0) + 1
-    status = {"rated": len(examples), "keep": int(y.sum()), "reject": int(len(y) - y.sum()), "active": False,
-              "sources": origins}
-    if len(examples) < c["min_ratings"] or min(status["keep"], status["reject"]) < c["min_per_side"]:
+    status = {"rated": len(examples), "keep": int(y_own.sum()), "reject": int(len(y_own) - y_own.sum()),
+              "active": False, "sources": origins, "shared": len(pool["y"]), "shared_folders": pool["folders"]}
+    keep = int(y.sum())
+    if len(y) < c["min_ratings"] or min(keep, len(y) - keep) < c["min_per_side"]:
         db.close()
         status["hint"] = (
             f"Not enough ratings yet: at least {c['min_ratings']} in total and "
@@ -301,14 +376,15 @@ def train(photo_dir: Path, config: dict, thorough: bool = False) -> dict:
     # Similar photos: label spreading over the CLIP features (needs AI data)
     has_emb = np.array([embedding(b) is not None for b in images])
     spread_oof = None
-    if has_emb.sum() >= 30 and has_emb[example_idx].mean() > 0.8:
+    if len(example_idx) >= 10 and has_emb.sum() >= 30 and has_emb[example_idx].mean() > 0.8:
         emb_rows = np.nonzero(has_emb)[0]
         emb_pos = {int(r): i for i, r in enumerate(emb_rows)}
         emb = np.array([embedding(images[r]) for r in emb_rows])
         graph = similarity_graph(emb, _reference_embeddings(config))
-        labeled = {emb_pos[int(r)]: float(v) for r, v in zip(example_idx, y) if int(r) in emb_pos}
+        labeled = {emb_pos[int(r)]: float(v) for r, v in zip(example_idx, y_own) if int(r) in emb_pos}
         spread_oof = np.full(len(y), np.nan)
         for test in folds:
+            test = test[test < len(example_idx)]  # shared ratings of other folders are not in this graph
             hidden = {emb_pos[int(example_idx[t])] for t in test if int(example_idx[t]) in emb_pos}
             scores = spread(graph, {i: v for i, v in labeled.items() if i not in hidden})
             for t in test:
@@ -317,9 +393,18 @@ def train(photo_dir: Path, config: dict, thorough: bool = False) -> dict:
         spread_all = np.full(len(images), np.nan)
         spread_all[emb_rows] = spread(graph, labeled)
 
+    all_embs = [e for e in (embedding(b) for b in images) if e is not None] + [e for e in pool["emb"] if e is not None]
+
+    def vectors(pca: dict | None) -> np.ndarray:
+        pooled = _pool_vectors(pool, pca)
+        if not examples:
+            return pooled
+        own = np.array([features(b, pca) for b in examples])
+        return np.vstack([own, pooled]) if pool["y"] else own
+
     def cross_validate(dims: int, l2: float) -> tuple[np.ndarray, dict | None]:
-        pca = _pca(images, dims)
-        x = np.array([features(b, pca) for b in examples])
+        pca = _pca(all_embs, dims)
+        x = vectors(pca)
         oof = np.full(len(y), float(y.mean()))
         for test in folds:
             learn = np.setdiff1d(np.arange(len(y)), test)
@@ -355,15 +440,16 @@ def train(photo_dir: Path, config: dict, thorough: bool = False) -> dict:
                 "accuracy": float(((oof >= 0.5) == (y == 1)).mean())}
 
     pca = best["pca"]
-    model = _fit(np.array([features(b, pca) for b in examples]), y, best["l2"])
+    model = _fit(vectors(pca), y, best["l2"])
     model.update(
-        features=[n for n, _ in FEATURES], pca=pca, accuracy=round(best["accuracy"], 3), rated=len(y),
+        features=[n for n, _ in FEATURES], pca=pca, accuracy=round(best["accuracy"], 3), rated=len(y_own),
+        shared=len(pool["y"]),
         trained=datetime.now().isoformat(timespec="seconds"), style_dims=best["dims"], l2=best["l2"],
         blend=best["blend"], thorough=thorough or last.get("thorough", False), sources=origins,
     )
     model_path(photo_dir).write_text(json.dumps(model), encoding="utf-8")
 
-    p = predict(model, np.array([features(b, pca) for b in images]))
+    p = predict(model, np.array([features(b, pca) for b in images])) if images else np.zeros(0)
     if spread_oof is not None and best["blend"] < 1:
         ok = ~np.isnan(spread_all)
         p[ok] = best["blend"] * p[ok] + (1 - best["blend"]) * spread_all[ok]
