@@ -127,19 +127,35 @@ def _set_aside(path: Path) -> Path:
     return target
 
 
+def _writable(folder: Path) -> bool:
+    probe = folder / f".write-test-{os.getpid()}"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def open_db(photo_dir: Path) -> sqlite3.Connection:
     path = data_dir(photo_dir) / DB_NAME
     is_new = not path.exists()
     try:
         db = _connect(path)
     except sqlite3.DatabaseError as error:
+        if not _writable(path.parent):
+            # Not damaged: the folder cannot be written to (write-protected memory card, read-only drive, no rights).
+            raise RuntimeError(f"WallyCull cannot write to {path.parent} ({error}). The folder or memory card is "
+                               "write-protected or read-only. Copy the photos to a folder on the PC and analyze "
+                               "that copy, or remove the write protection.") from error
         # Damaged, e.g. after the memory card was pulled out while writing: keep it aside, start fresh.
         # The measurements are simply made again; the old file stays for a rescue of the ratings.
         try:
             target = _set_aside(path)
         except OSError:
-            raise RuntimeError(f"The WallyCull database in this folder is damaged ({error}) and still in use. "
-                               "Close other WallyCull windows and try again.") from error
+            raise RuntimeError(f"The WallyCull database in this folder cannot be opened ({error}) and is still in "
+                               "use. Close other WallyCull windows (and any other program using this folder) "
+                               "and try again.") from error
         print(f"Note: the WallyCull database in this folder was damaged ({error}). "
               f"It was kept as {target.name}, and a new one was started; the photos are analyzed again.", flush=True)
         db, is_new = _connect(path), True

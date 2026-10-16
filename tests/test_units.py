@@ -104,3 +104,25 @@ def test_damaged_database_is_set_aside(tmp_path):
     db.close()
     kept = sorted(p.name for p in folder.iterdir() if ".damaged-" in p.name)
     assert kept and kept[0].startswith(database.DB_NAME + ".damaged-")
+
+
+def test_read_only_folder_is_not_treated_as_damaged(tmp_path, monkeypatch):
+    """A write-protected folder gets a clear message, and the database is not renamed."""
+    import sqlite3
+
+    import pytest
+
+    from wallycull import database
+
+    folder = tmp_path / database.DATA_DIR_NAME
+    folder.mkdir()
+    (folder / database.DB_NAME).write_bytes(b"")
+
+    def refuse(path):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(database, "_connect", refuse)
+    monkeypatch.setattr(database, "_writable", lambda folder: False)
+    with pytest.raises(RuntimeError, match="write-protected"):
+        database.open_db(tmp_path)
+    assert not any(".damaged-" in p.name for p in folder.iterdir())

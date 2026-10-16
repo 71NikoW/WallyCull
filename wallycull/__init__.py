@@ -2,7 +2,7 @@
 
 from . import paths
 
-__version__ = "0.10.2"
+__version__ = "0.10.3"
 
 # Bump whenever the measurements change: every image is then measured again.
 ANALYSIS_VERSION = 6

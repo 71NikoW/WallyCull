@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.3 - 2026-10-16
+
+- Fixed: a write-protected memory card or read-only folder was reported as a "damaged database still in
+  use". WallyCull now says the folder cannot be written to and suggests analyzing a copy on the PC.
+
 ## 0.10.2 - 2026-10-15
 
 - Fixed: once the AI was set up, the categories ignored your trained model and only used the generic AI
